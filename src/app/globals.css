@@ -1,0 +1,45 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Professional blue visual system.
+       Primary #2563EB · hover #1D4ED8 · light #DBEAFE · ring #3B82F6
+       Sidebar #0F172A · main bg #F8FAFC · text #0F172A · muted #64748B
+       borders #E2E8F0. Red is reserved for destructive/error states only. */
+    --background: 210 40% 98%;        /* #F8FAFC */
+    --foreground: 222 47% 11%;        /* #0F172A */
+    --card: 0 0% 100%;                /* #FFFFFF */
+    --card-foreground: 222 47% 11%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+    --primary: 221 83% 53%;           /* #2563EB */
+    --primary-foreground: 0 0% 100%;
+    --secondary: 210 40% 96%;
+    --secondary-foreground: 222 47% 11%;
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;  /* #64748B */
+    --accent: 221 83% 53%;            /* #2563EB */
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 84% 60%;         /* semantic only */
+    --destructive-foreground: 0 0% 100%;
+    --border: 214 32% 91%;            /* #E2E8F0 */
+    --input: 214 32% 91%;
+    --ring: 217 91% 60%;              /* #3B82F6 */
+    --radius: 0.625rem;
+    --sidebar: 222 47% 11%;           /* #0F172A */
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-accent: 221 83% 53%;    /* #2563EB active item */
+    --sidebar-border: 217 33% 17%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
