@@ -1,8 +1,8 @@
 "use client";
 
 import { Suspense, useMemo, useState, useEffect } from "react";
-import { useSearchParams } from "next/navigation";
-import { Pencil, Trash2, Users } from "lucide-react";
+import { useSearchParams, useRouter } from "next/navigation";
+import { Pencil, Trash2, Users, FilePlus } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { DataTable } from "@/components/shared/data-table";
 import { StatusBadge } from "@/components/shared/status-badge";
@@ -12,20 +12,26 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useCRMStore } from "@/lib/store/crm-store";
 import { useSettingsStore } from "@/lib/settings/settings-store";
-import { formatCurrency, formatDate } from "@/lib/utils";
+import { formatDate } from "@/lib/utils";
+import { formatCents } from "@/lib/money";
+import { leadDisplayName, leadMatchesQuery, primaryContact } from "@/lib/store/crm-extended";
 import {
   LEAD_STAGES,
   LEAD_STAGE_LABELS,
   SERVICE_LABELS,
+  serviceDisplay,
   LEAD_SOURCES,
   LEAD_SOURCE_LABELS,
-} from "@/lib/constants";
+} from "@/lib/domain";
 import type { Lead } from "@/types/database";
 
 function LeadsPageContent() {
   const searchParams = useSearchParams();
+  const router = useRouter();
   const leads = useCRMStore((s) => s.leads);
+  const quotes = useCRMStore((s) => s.quotes);
   const deleteLead = useCRMStore((s) => s.deleteLead);
+  const createQuoteForLead = useCRMStore((s) => s.createQuoteForLead);
   const hydrated = useCRMStore((s) => s._hasHydrated);
   const enabledServices = useSettingsStore((s) => s.services).filter((o) => o.enabled);
 
@@ -48,13 +54,17 @@ function LeadsPageContent() {
       ? enabledServices.map((o) => ({ value: o.value, label: o.label }))
       : Object.entries(SERVICE_LABELS).map(([value, label]) => ({ value, label }));
 
+  const quoteCount = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const q of quotes) {
+      if (q.lead_id) counts[q.lead_id] = (counts[q.lead_id] || 0) + 1;
+    }
+    return counts;
+  }, [quotes]);
+
   const filtered = useMemo(() => {
     return leads.filter((lead) => {
-      const matchSearch =
-        !search ||
-        lead.full_name.toLowerCase().includes(search.toLowerCase()) ||
-        lead.city.toLowerCase().includes(search.toLowerCase()) ||
-        lead.phone.includes(search);
+      const matchSearch = !search || leadMatchesQuery(lead, search);
       const matchStage = stageFilter === "all" || lead.status === stageFilter;
       const matchSource = sourceFilter === "all" || lead.lead_source === sourceFilter;
       const matchService = serviceFilter === "all" || lead.service_requested === serviceFilter;
@@ -64,7 +74,7 @@ function LeadsPageContent() {
 
   const handleDelete = (lead: Lead, e: React.MouseEvent) => {
     e.stopPropagation();
-    if (window.confirm(`Delete lead "${lead.full_name}"? This cannot be undone.`)) {
+    if (window.confirm(`Delete lead "${leadDisplayName(lead)}"? This cannot be undone.`)) {
       deleteLead(lead.id);
     }
   };
@@ -73,6 +83,12 @@ function LeadsPageContent() {
     e.stopPropagation();
     setEditingLead(lead);
     setFormOpen(true);
+  };
+
+  const handleCreateQuote = (lead: Lead, e: React.MouseEvent) => {
+    e.stopPropagation();
+    const quote = createQuoteForLead(lead.id);
+    if (quote) router.push(`/leads/${lead.id}/quotes/${quote.id}`);
   };
 
   const openNewLead = () => {
@@ -84,12 +100,15 @@ function LeadsPageContent() {
     {
       key: "name",
       header: "Lead",
-      render: (lead: Lead) => (
-        <div>
-          <p className="font-medium">{lead.full_name}</p>
-          <p className="text-xs text-muted-foreground">{lead.phone}</p>
-        </div>
-      ),
+      render: (lead: Lead) => {
+        const contact = primaryContact(lead);
+        return (
+          <div>
+            <p className="font-medium">{leadDisplayName(lead)}</p>
+            <p className="text-xs text-muted-foreground">{contact?.phone || lead.phone || "—"}</p>
+          </div>
+        );
+      },
     },
     {
       key: "location",
@@ -97,7 +116,9 @@ function LeadsPageContent() {
       render: (lead: Lead) => (
         <div>
           <p>{lead.city || "—"}</p>
-          {lead.county && <p className="text-xs text-muted-foreground">{lead.county}</p>}
+          {(lead.state || lead.county) && (
+            <p className="text-xs text-muted-foreground">{lead.state || lead.county}</p>
+          )}
         </div>
       ),
     },
@@ -106,7 +127,7 @@ function LeadsPageContent() {
       header: "Service",
       render: (lead: Lead) => (
         <span className="text-sm">
-          {SERVICE_LABELS[lead.service_requested] ?? lead.service_requested}
+          {serviceDisplay(lead.service_requested, lead.custom_service_name)}
         </span>
       ),
     },
@@ -116,10 +137,21 @@ function LeadsPageContent() {
       render: (lead: Lead) => <StatusBadge status={lead.lead_source} type="source" />,
     },
     {
+      key: "quotes",
+      header: "Quotes",
+      render: (lead: Lead) => (
+        <span className="text-sm text-muted-foreground">{quoteCount[lead.id] || 0}</span>
+      ),
+    },
+    {
       key: "value",
       header: "Est. Value",
       render: (lead: Lead) =>
-        lead.estimated_project_value ? formatCurrency(lead.estimated_project_value) : "—",
+        lead.estimated_value_cents
+          ? formatCents(lead.estimated_value_cents)
+          : lead.estimated_project_value
+            ? formatCents(Math.round(lead.estimated_project_value * 100))
+            : "—",
     },
     {
       key: "status",
@@ -138,10 +170,25 @@ function LeadsPageContent() {
       header: "",
       render: (lead: Lead) => (
         <div className="flex gap-1" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="h-8 w-8" onClick={(e) => handleEdit(lead, e)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-primary"
+            title="Create Quote"
+            onClick={(e) => handleCreateQuote(lead, e)}
+          >
+            <FilePlus className="h-3.5 w-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-8 w-8" title="Edit" onClick={(e) => handleEdit(lead, e)}>
             <Pencil className="h-3.5 w-3.5" />
           </Button>
-          <Button variant="ghost" size="icon" className="h-8 w-8 text-red-600" onClick={(e) => handleDelete(lead, e)}>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="h-8 w-8 text-red-600"
+            title="Delete"
+            onClick={(e) => handleDelete(lead, e)}
+          >
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         </div>
@@ -188,9 +235,7 @@ function LeadsPageContent() {
             <button
               onClick={() => setStageFilter("all")}
               className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border ${
-                stageFilter === "all"
-                  ? "bg-primary text-white border-primary"
-                  : "hover:bg-muted"
+                stageFilter === "all" ? "bg-primary text-white border-primary" : "hover:bg-muted"
               }`}
             >
               All ({leads.length})
@@ -203,9 +248,7 @@ function LeadsPageContent() {
                   key={stage}
                   onClick={() => setStageFilter(stage)}
                   className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium border ${
-                    stageFilter === stage
-                      ? "bg-primary text-white border-primary"
-                      : "hover:bg-muted"
+                    stageFilter === stage ? "bg-primary text-white border-primary" : "hover:bg-muted"
                   }`}
                 >
                   {LEAD_STAGE_LABELS[stage]} ({count})
@@ -256,7 +299,7 @@ function LeadsPageContent() {
             <DataTable
               data={filtered}
               columns={columns}
-              onRowClick={(lead) => (window.location.href = `/leads/${lead.id}`)}
+              onRowClick={(lead) => router.push(`/leads/${lead.id}`)}
             />
           )}
         </>

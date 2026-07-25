@@ -1,52 +1,73 @@
 "use client";
 
 import Link from "next/link";
-import { use, useState } from "react";
+import { use, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowLeft, Phone, Mail, MapPin, Calendar, DollarSign, Pencil, Trash2 } from "lucide-react";
+import {
+  ArrowLeft,
+  Phone,
+  Mail,
+  MapPin,
+  Calendar,
+  DollarSign,
+  Pencil,
+  Trash2,
+  Star,
+  ShieldCheck,
+} from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { StatusBadge } from "@/components/shared/status-badge";
-import { CommunicationTimeline } from "@/components/shared/communication-timeline";
 import { LeadFormDialog } from "@/components/leads/lead-form-dialog";
-import { QuoteFormDialog } from "@/components/quotes/quote-form-dialog";
 import { EstimateFormDialog } from "@/components/estimates/estimate-form-dialog";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { useCRMStore } from "@/lib/store/crm-store";
-import { formatCurrency, formatDate } from "@/lib/utils";
-import {
-  SERVICE_LABELS,
-  LEAD_STAGE_LABELS,
-  WINDOW_STYLE_LABELS,
-  FRAME_MATERIAL_LABELS,
-  PROJECT_TIMEFRAME_LABELS,
-  OCCUPANCY_LABELS,
-  CONTACT_METHOD_LABELS,
-  LEAD_QUALITY_LABELS,
-  PROPERTY_TYPE_LABELS,
-} from "@/lib/constants";
+import { formatDate, formatDateTime } from "@/lib/utils";
+import { formatCents } from "@/lib/money";
+import { canViewMarketingFields } from "@/lib/permissions";
+import { leadDisplayName } from "@/lib/store/crm-extended";
+import { serviceDisplay, LEAD_STAGE_LABELS, PROPERTY_TYPE_LABELS, URGENCY_LABELS } from "@/lib/domain";
 
-export default function LeadDetailPage({
-  params,
-}: {
-  params: Promise<{ id: string }>;
-}) {
+export default function LeadDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const { id } = use(params);
   const router = useRouter();
+
+  const hydrated = useCRMStore((s) => s._hasHydrated);
   const lead = useCRMStore((s) => s.leads.find((l) => l.id === id));
-  const communications = useCRMStore((s) =>
-    s.communications.filter((c) => c.entity_type === "lead" && c.entity_id === id)
-  );
   const deleteLead = useCRMStore((s) => s.deleteLead);
   const convertLeadToCustomer = useCRMStore((s) => s.convertLeadToCustomer);
+  const createQuoteForLead = useCRMStore((s) => s.createQuoteForLead);
   const quotes = useCRMStore((s) => s.quotes.filter((q) => q.lead_id === id));
+  const activities = useCRMStore((s) => s.leadActivities.filter((a) => a.lead_id === id));
+  const notifications = useCRMStore((s) => s.notifications.filter((n) => n.lead_id === id));
+  const confirmations = useCRMStore((s) => s.appointmentConfirmations.filter((c) => c.lead_id === id));
+  const teamMembers = useCRMStore((s) => s.teamMembers);
+  const currentTeamMemberId = useCRMStore((s) => s.currentTeamMemberId);
   const customer = useCRMStore((s) =>
     lead?.customer_id ? s.customers.find((c) => c.id === lead.customer_id) : undefined
   );
 
   const [editOpen, setEditOpen] = useState(false);
-  const [quoteOpen, setQuoteOpen] = useState(false);
   const [measurementOpen, setMeasurementOpen] = useState(false);
+
+  const actingUser = useMemo(
+    () => teamMembers.find((m) => m.id === currentTeamMemberId),
+    [teamMembers, currentTeamMemberId]
+  );
+  const showMarketing = canViewMarketingFields(actingUser);
+
+  const sortedActivities = useMemo(
+    () => [...activities].sort((a, b) => (a.created_at < b.created_at ? 1 : -1)),
+    [activities]
+  );
+
+  if (!hydrated) {
+    return (
+      <div className="flex items-center justify-center py-20 text-muted-foreground">
+        Loading lead...
+      </div>
+    );
+  }
 
   if (!lead) {
     return (
@@ -59,89 +80,56 @@ export default function LeadDetailPage({
     );
   }
 
+  const displayName = leadDisplayName(lead);
+  const locationLine = [lead.city, lead.state || lead.county].filter(Boolean).join(", ");
+  const serviceLabel = serviceDisplay(lead.service_requested, lead.custom_service_name);
+
   const handleDelete = () => {
-    if (window.confirm(`Delete lead "${lead.full_name}"?`)) {
+    if (window.confirm(`Delete lead "${displayName}"?`)) {
       deleteLead(lead.id);
       router.push("/leads");
     }
   };
 
-  const locationLine = [lead.city, lead.county].filter(Boolean).join(", ");
-  const serviceLabel = SERVICE_LABELS[lead.service_requested] ?? lead.service_requested;
+  const handleCreateQuote = () => {
+    const quote = createQuoteForLead(lead.id);
+    if (quote) router.push(`/leads/${lead.id}/quotes/${quote.id}`);
+  };
 
-  const interests = [
-    lead.impact_interest ? "Impact windows" : null,
-    lead.energy_efficiency_interest ? "Energy efficiency" : null,
-    lead.financing_interest ? "Financing" : null,
-  ].filter(Boolean) as string[];
-
-  const projectDetails: { label: string; value: string }[] = [];
-  if (lead.window_opening_count != null)
-    projectDetails.push({ label: "Window Openings", value: String(lead.window_opening_count) });
-  if (lead.preferred_window_style)
-    projectDetails.push({
-      label: "Preferred Style",
-      value: WINDOW_STYLE_LABELS[lead.preferred_window_style] ?? lead.preferred_window_style,
-    });
-  if (lead.preferred_frame_material)
-    projectDetails.push({
-      label: "Frame Material",
-      value:
-        FRAME_MATERIAL_LABELS[lead.preferred_frame_material] ?? lead.preferred_frame_material,
-    });
-  if (lead.project_timeframe)
-    projectDetails.push({
-      label: "Timeframe",
-      value: PROJECT_TIMEFRAME_LABELS[lead.project_timeframe] ?? lead.project_timeframe,
-    });
-  if (lead.occupancy)
-    projectDetails.push({
-      label: "Occupancy",
-      value: OCCUPANCY_LABELS[lead.occupancy] ?? lead.occupancy,
-    });
-  if (lead.preferred_contact_method)
-    projectDetails.push({
-      label: "Preferred Contact",
-      value: CONTACT_METHOD_LABELS[lead.preferred_contact_method] ?? lead.preferred_contact_method,
-    });
-  if (lead.lead_quality)
-    projectDetails.push({
-      label: "Lead Quality",
-      value: LEAD_QUALITY_LABELS[lead.lead_quality] ?? lead.lead_quality,
-    });
+  // New lead fields (§5/§6)
+  const details: { label: string; value: string }[] = [];
+  details.push({ label: "Service", value: serviceLabel });
   if (lead.property_type)
-    projectDetails.push({
-      label: "Property Type",
-      value: PROPERTY_TYPE_LABELS[lead.property_type] ?? lead.property_type,
-    });
-  if (lead.decision_maker)
-    projectDetails.push({ label: "Decision-Maker", value: "Yes" });
-  if (lead.next_follow_up_date)
-    projectDetails.push({ label: "Next Follow-Up", value: formatDate(lead.next_follow_up_date) });
-  if (lead.preferred_appointment_date)
-    projectDetails.push({
-      label: "Preferred Appointment",
-      value: formatDate(lead.preferred_appointment_date),
-    });
+    details.push({ label: "Property Type", value: PROPERTY_TYPE_LABELS[lead.property_type] ?? lead.property_type });
+  if (lead.urgency) details.push({ label: "Urgency", value: URGENCY_LABELS[lead.urgency] ?? lead.urgency });
+  if (lead.state) details.push({ label: "State", value: lead.state });
+  if (lead.property_value_cents != null)
+    details.push({ label: "Property Value", value: formatCents(lead.property_value_cents) });
+  if (lead.building_value_cents != null)
+    details.push({ label: "Building Value", value: formatCents(lead.building_value_cents) });
+  if (lead.estimated_value_cents != null)
+    details.push({ label: "Estimated Project Value", value: formatCents(lead.estimated_value_cents) });
+  if (lead.appointment_at)
+    details.push({ label: "Appointment", value: formatDateTime(lead.appointment_at) });
 
   const marketingDetails: { label: string; value: string }[] = [];
   if (lead.campaign_name) marketingDetails.push({ label: "Campaign", value: lead.campaign_name });
-  if (lead.referral_partner)
-    marketingDetails.push({ label: "Referral Partner", value: lead.referral_partner });
+  if (lead.referral_partner) marketingDetails.push({ label: "Referral Partner", value: lead.referral_partner });
   if (lead.utm_source) marketingDetails.push({ label: "UTM Source", value: lead.utm_source });
   if (lead.utm_medium) marketingDetails.push({ label: "UTM Medium", value: lead.utm_medium });
-  if (lead.utm_campaign)
-    marketingDetails.push({ label: "UTM Campaign", value: lead.utm_campaign });
+  if (lead.utm_campaign) marketingDetails.push({ label: "UTM Campaign", value: lead.utm_campaign });
 
   return (
     <div className="space-y-6">
       <PageHeader
-        title={lead.full_name}
+        title={displayName}
         description={locationLine ? `${locationLine} — ${serviceLabel}` : serviceLabel}
         actions={
           <>
             <Button variant="outline" asChild>
-              <Link href="/leads"><ArrowLeft className="h-4 w-4 mr-1" /> Back</Link>
+              <Link href="/leads">
+                <ArrowLeft className="h-4 w-4 mr-1" /> Back
+              </Link>
             </Button>
             <Button variant="outline" onClick={() => setEditOpen(true)}>
               <Pencil className="h-4 w-4 mr-1" /> Edit
@@ -149,7 +137,9 @@ export default function LeadDetailPage({
             <Button variant="outline" onClick={() => setMeasurementOpen(true)}>
               Schedule Measurement
             </Button>
-            <Button variant="outline" onClick={() => setQuoteOpen(true)}>Create Quote</Button>
+            <Button className="bg-primary hover:bg-brand-blue-dark" onClick={handleCreateQuote}>
+              Create Quote
+            </Button>
             {!lead.customer_id && !customer && (
               <Button variant="outline" onClick={() => convertLeadToCustomer(lead.id)}>
                 Convert to Customer
@@ -169,30 +159,77 @@ export default function LeadDetailPage({
 
       <div className="grid gap-6 lg:grid-cols-3">
         <div className="lg:col-span-2 space-y-6">
+          {/* Contacts (§3) */}
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base">Contacts ({lead.contacts?.length || 0})</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {(lead.contacts || []).map((c) => (
+                <div key={c.id} className="rounded-lg border p-3">
+                  <div className="flex items-center justify-between">
+                    <p className="font-medium">
+                      {`${c.first_name} ${c.last_name}`.trim() || "Unnamed"}
+                    </p>
+                    {c.id === lead.primary_contact_id && (
+                      <span className="rounded-full bg-brand-blue-light px-2 py-0.5 text-xs font-medium text-primary">
+                        Primary
+                      </span>
+                    )}
+                  </div>
+                  <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm text-muted-foreground">
+                    {c.phone && (
+                      <span className="inline-flex items-center gap-1">
+                        <Phone className="h-3.5 w-3.5" /> {c.phone}
+                      </span>
+                    )}
+                    {c.email && (
+                      <span className="inline-flex items-center gap-1">
+                        <Mail className="h-3.5 w-3.5" /> {c.email}
+                      </span>
+                    )}
+                  </div>
+                  {c.notes && <p className="mt-1 text-sm">{c.notes}</p>}
+                </div>
+              ))}
+              {(!lead.contacts || lead.contacts.length === 0) && (
+                <p className="text-sm text-muted-foreground">No contacts on file.</p>
+              )}
+            </CardContent>
+          </Card>
+
+          {/* Lead details */}
           <Card>
             <CardHeader>
               <CardTitle className="text-base">Lead Details</CardTitle>
             </CardHeader>
             <CardContent className="grid gap-4 sm:grid-cols-2">
-              <InfoRow icon={Phone} label="Phone" value={lead.phone} />
-              {lead.email && <InfoRow icon={Mail} label="Email" value={lead.email} />}
               <InfoRow
                 icon={MapPin}
                 label="Address"
                 value={
-                  [lead.address, lead.city, lead.zip_code].filter(Boolean).join(", ") || "—"
+                  lead.formatted_address ||
+                  [lead.address, lead.city, lead.state, lead.zip_code].filter(Boolean).join(", ") ||
+                  "—"
                 }
               />
               <InfoRow icon={Calendar} label="Created" value={formatDate(lead.created_at)} />
-              <InfoRow
-                icon={DollarSign}
-                label="Est. Value"
-                value={
-                  lead.estimated_project_value
-                    ? formatCurrency(lead.estimated_project_value)
-                    : "TBD"
-                }
-              />
+              {details.map((d) => (
+                <div key={d.label} className="flex gap-3">
+                  <DollarSign className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0 opacity-0" />
+                  <div>
+                    <p className="text-xs text-muted-foreground">{d.label}</p>
+                    <p className="text-sm">{d.value}</p>
+                  </div>
+                </div>
+              ))}
+              <div className="flex gap-3">
+                <ShieldCheck className="h-4 w-4 text-muted-foreground mt-0.5 shrink-0" />
+                <div>
+                  <p className="text-xs text-muted-foreground">PA Verified</p>
+                  <p className="text-sm">{lead.pa_verified ? "Yes" : "No"}</p>
+                </div>
+              </div>
               <div>
                 <p className="text-xs text-muted-foreground mb-1">Stage</p>
                 <StatusBadge status={lead.status} type="lead" />
@@ -202,47 +239,13 @@ export default function LeadDetailPage({
                 <StatusBadge status={lead.lead_source} type="source" />
               </div>
               {lead.assigned_estimator_name && (
-                <InfoRow
-                  icon={Phone}
-                  label="Assigned Sales Rep"
-                  value={lead.assigned_estimator_name}
-                />
+                <InfoRow icon={Star} label="Assigned Sales Rep" value={lead.assigned_estimator_name} />
               )}
             </CardContent>
           </Card>
 
-          {(projectDetails.length > 0 || interests.length > 0) && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-base">Window Project Details</CardTitle>
-              </CardHeader>
-              <CardContent className="grid gap-4 sm:grid-cols-2">
-                {projectDetails.map((d) => (
-                  <div key={d.label}>
-                    <p className="text-xs text-muted-foreground">{d.label}</p>
-                    <p className="text-sm">{d.value}</p>
-                  </div>
-                ))}
-                {interests.length > 0 && (
-                  <div className="sm:col-span-2">
-                    <p className="text-xs text-muted-foreground mb-1">Interests</p>
-                    <div className="flex flex-wrap gap-1.5">
-                      {interests.map((i) => (
-                        <span
-                          key={i}
-                          className="rounded-full bg-brand-blue-light px-2.5 py-0.5 text-xs font-medium text-primary"
-                        >
-                          {i}
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          )}
-
-          {marketingDetails.length > 0 && (
+          {/* Marketing attribution — role-gated (§11) */}
+          {showMarketing && marketingDetails.length > 0 && (
             <Card>
               <CardHeader>
                 <CardTitle className="text-base">Marketing Attribution</CardTitle>
@@ -258,14 +261,24 @@ export default function LeadDetailPage({
             </Card>
           )}
 
+          {/* Quotes */}
           {quotes.length > 0 && (
             <Card>
-              <CardHeader><CardTitle className="text-base">Quotes ({quotes.length})</CardTitle></CardHeader>
+              <CardHeader>
+                <CardTitle className="text-base">Quotes ({quotes.length})</CardTitle>
+              </CardHeader>
               <CardContent className="space-y-2">
                 {quotes.map((q) => (
-                  <div key={q.id} className="flex justify-between rounded-lg border p-3 text-sm">
-                    <span>{formatCurrency(q.total)} — {q.status}</span>
-                    <Link href="/quotes" className="text-primary hover:underline">View</Link>
+                  <div key={q.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                    <span>
+                      {formatCents(q.total_cents ?? Math.round((q.total || 0) * 100))} — {q.status}
+                    </span>
+                    <Link
+                      href={`/leads/${lead.id}/quotes/${q.id}`}
+                      className="text-primary hover:underline"
+                    >
+                      Open
+                    </Link>
                   </div>
                 ))}
               </CardContent>
@@ -274,35 +287,86 @@ export default function LeadDetailPage({
 
           {lead.notes && (
             <Card>
-              <CardHeader><CardTitle className="text-base">Notes</CardTitle></CardHeader>
-              <CardContent><p className="text-sm">{lead.notes}</p></CardContent>
+              <CardHeader>
+                <CardTitle className="text-base">Notes</CardTitle>
+              </CardHeader>
+              <CardContent>
+                <p className="text-sm">{lead.notes}</p>
+              </CardContent>
             </Card>
           )}
 
+          {/* Notification / confirmation status (§8/§10) */}
+          {(notifications.length > 0 || confirmations.length > 0) && (
+            <Card>
+              <CardHeader>
+                <CardTitle className="text-base">Assignment &amp; Confirmations</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {notifications.map((n) => (
+                  <div key={n.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                    <div>
+                      <p className="font-medium">{n.subject}</p>
+                      <p className="text-xs text-muted-foreground">{n.to_email}</p>
+                    </div>
+                    <span className="text-xs font-medium capitalize text-muted-foreground">
+                      {n.status}
+                    </span>
+                  </div>
+                ))}
+                {confirmations.map((c) => (
+                  <div key={c.id} className="flex items-center justify-between rounded-lg border p-3 text-sm">
+                    <span className="text-muted-foreground">
+                      Confirmation ({c.recipient_role || "recipient"})
+                    </span>
+                    <span className="text-xs font-medium capitalize">{c.status}</span>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+
+          {/* Activity timeline (§28) */}
           <Card>
-            <CardHeader><CardTitle className="text-base">Communication Timeline</CardTitle></CardHeader>
+            <CardHeader>
+              <CardTitle className="text-base">Activity Timeline</CardTitle>
+            </CardHeader>
             <CardContent>
-              <CommunicationTimeline communications={communications} />
+              {sortedActivities.length === 0 ? (
+                <p className="text-sm text-muted-foreground">No activity recorded yet.</p>
+              ) : (
+                <ol className="space-y-3">
+                  {sortedActivities.map((a) => (
+                    <li key={a.id} className="flex gap-3">
+                      <span className="mt-1.5 h-2 w-2 shrink-0 rounded-full bg-primary" />
+                      <div>
+                        <p className="text-sm">{a.description}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {a.actor} · {formatDateTime(a.created_at)}
+                        </p>
+                      </div>
+                    </li>
+                  ))}
+                </ol>
+              )}
             </CardContent>
           </Card>
         </div>
 
         <Card>
-          <CardHeader><CardTitle className="text-base">Pipeline</CardTitle></CardHeader>
+          <CardHeader>
+            <CardTitle className="text-base">Pipeline</CardTitle>
+          </CardHeader>
           <CardContent className="space-y-2">
             {Object.entries(LEAD_STAGE_LABELS).map(([key, label]) => (
               <div
                 key={key}
                 className={`flex items-center gap-2 rounded-lg px-3 py-2 text-sm ${
-                  lead.status === key
-                    ? "bg-brand-blue-light font-medium text-primary"
-                    : "text-muted-foreground"
+                  lead.status === key ? "bg-brand-blue-light font-medium text-primary" : "text-muted-foreground"
                 }`}
               >
                 <span
-                  className={`h-2 w-2 rounded-full ${
-                    lead.status === key ? "bg-primary" : "bg-gray-300"
-                  }`}
+                  className={`h-2 w-2 rounded-full ${lead.status === key ? "bg-primary" : "bg-gray-300"}`}
                 />
                 {label}
               </div>
@@ -312,16 +376,15 @@ export default function LeadDetailPage({
       </div>
 
       <LeadFormDialog open={editOpen} onOpenChange={setEditOpen} lead={lead} />
-      <QuoteFormDialog open={quoteOpen} onOpenChange={setQuoteOpen} defaultLeadId={lead.id} />
       <EstimateFormDialog
         open={measurementOpen}
         onOpenChange={setMeasurementOpen}
         defaultValues={{
           lead_id: lead.id,
-          customer_name: lead.full_name,
+          customer_name: displayName,
           property_address: lead.address,
           city: lead.city,
-          county: lead.county,
+          county: lead.state || lead.county,
           service_type: lead.service_requested,
           status: "scheduled",
         }}

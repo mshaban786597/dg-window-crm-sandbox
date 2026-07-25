@@ -15,6 +15,7 @@ import type {
   WindowOpening,
   QuoteLineItem,
   PurchaseOrderItem,
+  LeadContact,
 } from "@/types/database";
 
 export interface CustomerFormData {
@@ -32,40 +33,51 @@ export interface CustomerFormData {
 }
 
 export interface LeadFormData {
-  full_name: string;
-  phone: string;
+  // §3 repeatable contacts (authoritative). full_name/phone/email are derived
+  // from the primary contact by the store for back-compat.
+  contacts: LeadContact[];
+  primary_contact_id?: string;
+  full_name?: string;
+  phone?: string;
   email?: string;
+
   address: string;
   city: string;
-  county: string;
+  county?: string; // legacy
+  state?: string; // §5
   zip_code: string;
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+  formatted_address?: string;
+
   service_requested: ServiceType;
+  custom_service_name?: string; // §6
   lead_source: LeadSource;
   urgency: UrgencyLevel;
   property_type: PropertyType;
-  preferred_appointment_date?: string;
+
+  // §5 currency-safe (cents) + PA verified + appointment timestamp
+  property_value_cents?: number;
+  building_value_cents?: number;
+  estimated_value_cents?: number;
+  pa_verified?: boolean;
+  appointment_at?: string;
+
   assigned_estimator_id?: string;
   assigned_estimator_name?: string;
   notes?: string;
   status: LeadStage;
-  estimated_project_value?: number;
+  estimated_project_value?: number; // legacy
 
-  // Window qualification (optional)
-  window_opening_count?: number;
-  preferred_window_style?: string;
-  preferred_frame_material?: string;
-  impact_interest?: boolean;
-  energy_efficiency_interest?: boolean;
-  financing_interest?: boolean;
-  project_timeframe?: string;
-  occupancy?: string;
-  decision_maker?: boolean;
-  preferred_contact_method?: string;
+  // Marketing attribution (§11 — role-gated in the UI)
   campaign_name?: string;
+  referral_partner?: string;
   utm_source?: string;
   utm_medium?: string;
   utm_campaign?: string;
-  referral_partner?: string;
+
+  needs_assignment?: boolean;
   lead_quality?: LeadQuality;
   next_follow_up_date?: string;
 }
@@ -103,6 +115,10 @@ export interface EstimateFormData {
   openings: WindowOpening[];
 }
 
+// Legacy quote-from-measurement payload. The primary quote flow is now the
+// inventory-based lead quote page (§15/§24); this remains only for the
+// Measurements → draft-quote convenience path. Removed money controls (§16)
+// no longer exist here.
 export interface QuoteFormData {
   lead_id?: string;
   customer_id?: string;
@@ -114,13 +130,6 @@ export interface QuoteFormData {
   line_items: QuoteLineItem[];
   discount: number;
   tax_rate: number;
-  deposit_amount?: number;
-  optional_upgrades?: string[];
-  financing_option?: string;
-  production_lead_time?: string;
-  installation_duration?: string;
-  warranty_notes?: string;
-  expires_at?: string;
   status: QuoteStatus;
   internal_notes?: string;
   customer_notes?: string;

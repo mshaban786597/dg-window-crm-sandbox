@@ -57,26 +57,52 @@ export interface Profile {
 
 export interface Lead {
   id: string;
+  // Legacy single-contact fields — retained for back-compat/display. The
+  // authoritative contact data now lives in `contacts` (§3). On migration the
+  // old full_name/phone/email become the primary LeadContact.
   full_name: string;
   phone: string;
   email?: string;
+
+  // Repeatable contacts (§3). At least one; exactly one is primary.
+  contacts: LeadContact[];
+  primary_contact_id?: string;
+
   address: string;
   city: string;
-  county: string; // county or region
+  county: string; // legacy; superseded by `state`
+  state?: string; // §5 — renamed from County / Region
   zip_code: string;
-  service_requested: ServiceType; // project type / service needed
+  country?: string;
+  latitude?: number;
+  longitude?: number;
+  formatted_address?: string;
+
+  service_requested: ServiceType; // one of LEAD_SERVICE_OPTIONS
+  custom_service_name?: string; // §6 — set when service_requested === "custom"
   lead_source: LeadSource;
   urgency: UrgencyLevel;
   property_type: PropertyType;
   notes?: string;
   photos?: string[];
-  preferred_appointment_date?: string;
+
+  // Currency-safe values stored as integer cents (§5).
+  property_value_cents?: number;
+  building_value_cents?: number;
+  estimated_value_cents?: number;
+  pa_verified?: boolean; // §5 — Public Adjuster / property-appraiser verified
+
+  // Appointment date & time — full ISO timestamp (§5, renamed field).
+  appointment_at?: string;
+  preferred_appointment_date?: string; // legacy alias
+
   created_at: string;
   updated_at?: string;
-  assigned_estimator_id?: string; // assigned sales representative
+  assigned_estimator_id?: string; // assigned sales representative (team member id)
   assigned_estimator_name?: string;
+  needs_assignment?: boolean; // §12 — flagged when website lead has no manager
   status: LeadStage;
-  estimated_project_value?: number;
+  estimated_project_value?: number; // legacy dollar value; prefer estimated_value_cents
   customer_id?: string;
 
   // Window project qualification (all optional — keep first entry fast)
@@ -209,32 +235,72 @@ export interface QuoteLineItem {
 export interface Quote {
   id: string;
   estimate_id?: string;
-  lead_id?: string;
+  lead_id?: string; // §15 — every new quote is associated with a lead
+  owner_id?: string; // assigned sales rep (team member) — drives visibility (§14)
   customer_id: string;
   customer_name: string;
   property_address: string;
   service_type: ServiceType;
   status: QuoteStatus;
-  scope_of_work: string;
-  line_items: QuoteLineItem[];
 
-  subtotal: number;
-  discount: number;
-  tax: number;
+  // §15 — "Scope of Work" renamed to Notes; shown on the customer agreement.
+  notes?: string;
+  scope_of_work?: string; // legacy alias
+
+  // §24/§25 — inventory-based configured line items with immutable snapshots.
+  // Optional at the type level so legacy quote flows compile; the new
+  // lead-based quote page always populates them.
+  items?: QuoteItem[];
+  subtotal_cents?: number;
+  total_cents?: number;
+
+  // Legacy fields retained so existing /quotes list + convert-to-job compile.
+  line_items?: QuoteLineItem[];
+  subtotal?: number;
+  discount?: number;
+  tax?: number;
   deposit_amount?: number;
-  total: number;
+  total: number; // dollar mirror of total_cents for legacy consumers
 
-  optional_upgrades?: string[];
-  financing_option?: string;
-  production_lead_time?: string;
-  installation_duration?: string;
-  warranty_notes?: string;
-  expires_at?: string;
   customer_notes?: string;
   internal_notes?: string;
   sent_at?: string;
   created_at: string;
   updated_at?: string;
+}
+
+/** A single attribute choice captured on a quote line (immutable snapshot). */
+export interface QuoteItemAttributeSelection {
+  attribute_id: string;
+  attribute_name: string;
+  type: "select" | "number";
+  option_id?: string;
+  option_label?: string;
+  number_value?: number;
+  unit_label?: string;
+  // Snapshotted pricing at time of add (per selection / per unit-of-measure).
+  cost_cents: number; // internal cost contribution
+  upcharge_cents: number; // customer-facing contribution
+}
+
+/** A configured inventory item added to a quote — fully snapshotted (§25). */
+export interface QuoteItem {
+  id: string;
+  catalog_item_id: string;
+  // Snapshots — historical quotes must not change if the catalog changes.
+  series_snapshot: string;
+  window_type_snapshot: string;
+  universal_range_snapshot: string;
+  item_name_snapshot: string;
+  base_price_cents_snapshot: number;
+  base_cost_cents_snapshot: number;
+  selections: QuoteItemAttributeSelection[];
+  configured_unit_price_cents: number;
+  configured_unit_cost_cents: number;
+  quantity: number;
+  line_total_cents: number;
+  line_cost_cents: number;
+  created_at: string;
 }
 
 export interface PurchaseOrderItem {
@@ -481,4 +547,193 @@ export interface Invoice {
   status: "draft" | "sent" | "paid" | "overdue";
   due_date: string;
   paid_at?: string;
+}
+
+// ── §3 Repeatable lead contacts ──────────────────────────────────
+export interface LeadContact {
+  id: string;
+  lead_id?: string;
+  first_name: string;
+  last_name: string;
+  phone: string;
+  email?: string;
+  notes?: string;
+  is_primary: boolean;
+  created_at: string;
+  updated_at?: string;
+}
+
+// ── §7 Team members (UserProfile) ────────────────────────────────
+import type { TeamRole } from "@/lib/domain";
+export type { TeamRole };
+
+export interface NotificationPreferences {
+  email_assignment: boolean;
+  email_confirmation: boolean;
+}
+
+export interface TeamMember {
+  id: string;
+  first_name: string;
+  last_name: string;
+  email: string;
+  phone?: string;
+  role: TeamRole;
+  active: boolean;
+  manager_id?: string; // §7 — a rep may have one manager
+  notification_preferences: NotificationPreferences;
+  created_at: string;
+  updated_at?: string;
+}
+
+// ── §8/§12/§28 Notifications (outbox / log) ──────────────────────
+export type NotificationKind =
+  | "lead_assignment"
+  | "manager_assignment"
+  | "website_manager"
+  | "admin_unassigned";
+
+export interface NotificationRecord {
+  id: string;
+  kind: NotificationKind;
+  lead_id: string;
+  recipient_user_id?: string;
+  recipient_role?: string;
+  to_email: string;
+  subject: string;
+  body_html: string;
+  status: "queued" | "sent" | "failed" | "sandbox";
+  error?: string;
+  dedupe_key: string; // prevents duplicate sends on retry (§8)
+  confirmation_id?: string;
+  created_at: string;
+  sent_at?: string;
+}
+
+// ── §10 Appointment confirmations ────────────────────────────────
+export interface AppointmentConfirmation {
+  id: string;
+  notification_id: string;
+  lead_id: string;
+  recipient_user_id?: string;
+  recipient_role?: string;
+  token_hash: string; // only the hash is stored (§10)
+  status: "pending" | "confirmed" | "expired";
+  expires_at: string;
+  confirmed_at?: string;
+  created_at: string;
+}
+
+// ── §28 Lead activity timeline ───────────────────────────────────
+export type LeadActivityType =
+  | "lead_created"
+  | "contact_added"
+  | "lead_assigned"
+  | "appointment_scheduled"
+  | "assignment_email_generated"
+  | "assignment_email_sent"
+  | "assignment_email_failed"
+  | "rep_confirmed_receipt"
+  | "manager_confirmed_receipt"
+  | "website_lead_imported"
+  | "quote_started"
+  | "quote_saved"
+  | "quote_status_changed";
+
+export interface LeadActivity {
+  id: string;
+  lead_id: string;
+  type: LeadActivityType;
+  actor: string; // user name or "System" / "Website"
+  description: string;
+  related_id?: string;
+  metadata?: Record<string, string | number | boolean | null>;
+  created_at: string;
+}
+
+// ── §18–§22 Inventory catalog hierarchy ──────────────────────────
+export interface CatalogSeries {
+  id: string;
+  name: string;
+  description?: string;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CatalogWindowType {
+  id: string;
+  series_id: string;
+  name: string;
+  active: boolean;
+  sort_order: number;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CatalogUniversalRange {
+  id: string;
+  window_type_id: string;
+  label: string;
+  min_in: number; // inclusive
+  max_in: number; // inclusive
+  base_cost_cents?: number;
+  base_price_cents?: number;
+  active: boolean;
+  sort_order: number;
+  notes?: string;
+  created_at: string;
+  updated_at?: string;
+}
+
+export interface CatalogAttributeOption {
+  id: string;
+  label: string;
+  cost_adj_cents: number; // internal cost adjustment
+  upcharge_cents: number; // customer upcharge
+  is_default: boolean;
+  active: boolean;
+  sort_order: number;
+}
+
+export interface CatalogAttribute {
+  id: string;
+  item_id: string; // attached to a sellable item
+  name: string;
+  type: "select" | "number";
+  required: boolean;
+  active: boolean;
+  sort_order: number;
+  // select-type:
+  options?: CatalogAttributeOption[];
+  // number-type:
+  unit_label?: string;
+  cost_per_unit_cents?: number;
+  charge_per_unit_cents?: number;
+  min?: number;
+  max?: number;
+  step?: number;
+  default_value?: number;
+}
+
+export interface CatalogItem {
+  id: string;
+  name: string;
+  series_id: string;
+  window_type_id: string;
+  universal_range_id?: string;
+  base_cost_cents: number;
+  base_price_cents: number;
+  supplier?: string;
+  sku?: string;
+  inventory_mode: "tracked" | "unlimited";
+  quantity?: number; // tracked mode only
+  reorder_level?: number; // tracked mode only
+  active: boolean;
+  archived: boolean; // archived items stay on historical quotes (§18/§25)
+  notes?: string;
+  attributes: CatalogAttribute[];
+  created_at: string;
+  updated_at?: string;
 }

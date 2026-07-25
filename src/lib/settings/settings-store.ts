@@ -64,6 +64,15 @@ export interface CompanySettings {
   default_deposit_percent: number;
   integrations: IntegrationConfig[];
   automations: AutomationConfig[];
+  // §10 appointment confirmation expiry
+  confirmation_expiry_days: number;
+  // §12 website lead auto-assignment
+  website_assignment_mode: "default_manager" | "round_robin";
+  default_website_manager_id: string;
+  round_robin_enabled: boolean;
+  round_robin_cursor: number;
+  // §20 cost visibility for managers
+  manager_cost_visible: boolean;
 }
 
 const toOptions = (
@@ -119,6 +128,12 @@ export function defaultSettings(): CompanySettings {
     default_deposit_percent: DEFAULT_COMPANY.default_deposit_percent,
     integrations: DEFAULT_INTEGRATIONS,
     automations: DEFAULT_AUTOMATIONS,
+    confirmation_expiry_days: 14,
+    website_assignment_mode: "default_manager",
+    default_website_manager_id: "",
+    round_robin_enabled: false,
+    round_robin_cursor: 0,
+    manager_cost_visible: false,
   };
 }
 
@@ -246,6 +261,12 @@ export const useSettingsStore = create<SettingsState>()(
         default_deposit_percent: state.default_deposit_percent,
         integrations: state.integrations,
         automations: state.automations,
+        confirmation_expiry_days: state.confirmation_expiry_days,
+        website_assignment_mode: state.website_assignment_mode,
+        default_website_manager_id: state.default_website_manager_id,
+        round_robin_enabled: state.round_robin_enabled,
+        round_robin_cursor: state.round_robin_cursor,
+        manager_cost_visible: state.manager_cost_visible,
       }),
     }
   )

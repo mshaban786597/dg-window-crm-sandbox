@@ -57,6 +57,7 @@ export const SERVICES = [
   "custom_windows",
   "commercial_windows",
   "sliding_glass_doors",
+  "custom",
 ] as const;
 export type ServiceType = (typeof SERVICES)[number];
 
@@ -71,7 +72,33 @@ export const SERVICE_LABELS: Record<string, string> = {
   custom_windows: "Custom Windows",
   commercial_windows: "Commercial Windows",
   sliding_glass_doors: "Sliding Glass Doors",
+  custom: "Custom",
 };
+
+// ── Add-Lead "Service Requested" options (§6) ────────────────────
+// The Add Lead form exposes ONLY these four choices. Selecting "custom"
+// reveals a required free-text field stored as `custom_service_name` on the
+// lead — it is NOT added to this global list or the taxonomy above.
+export const LEAD_SERVICE_OPTIONS = [
+  "window_replacement",
+  "window_repair",
+  "sliding_glass_doors",
+  "custom",
+] as const;
+export type LeadServiceOption = (typeof LEAD_SERVICE_OPTIONS)[number];
+
+export const LEAD_SERVICE_LABELS: Record<string, string> = {
+  window_replacement: "Window Replacement",
+  window_repair: "Window Repair",
+  sliding_glass_doors: "Sliding Glass Door",
+  custom: "Custom",
+};
+
+/** Display helper: returns the lead-specific custom name when service is Custom. */
+export function serviceDisplay(serviceType: string, customName?: string | null): string {
+  if (serviceType === "custom") return (customName && customName.trim()) || "Custom Service";
+  return SERVICE_LABELS[serviceType] || serviceType;
+}
 
 // ── Property types ───────────────────────────────────────────────
 export const PROPERTY_TYPES = [
@@ -627,21 +654,24 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
 ];
 
 // ── Navigation ───────────────────────────────────────────────────
+// Sidebar order (§13): Dashboard, Leads, Quotes first — Customers and
+// Measurements come AFTER Quotes, not between Leads and Quotes.
+// `roles` lists the new team roles (see TEAM_ROLES); "all" = every role.
 export const NAV_ITEMS = [
   { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard", roles: "all" },
   { href: "/leads", label: "Leads", icon: "Users", roles: "all" },
+  { href: "/quotes", label: "Quotes", icon: "FileText", roles: "administrator,manager,sales_representative" },
   { href: "/customers", label: "Customers", icon: "UserCircle", roles: "all" },
   { href: "/estimates", label: "Measurements", icon: "Ruler", roles: "all" },
-  { href: "/quotes", label: "Quotes", icon: "FileText", roles: "all" },
-  { href: "/orders", label: "Window Orders", icon: "PackageOpen", roles: "all" },
+  { href: "/orders", label: "Window Orders", icon: "PackageOpen", roles: "administrator,manager,sales_representative" },
   { href: "/jobs", label: "Jobs", icon: "Hammer", roles: "all" },
   { href: "/calendar", label: "Calendar", icon: "Calendar", roles: "all" },
-  { href: "/crews", label: "Crews", icon: "HardHat", roles: "crew_manager,owner,field_crew" },
-  { href: "/inventory", label: "Inventory", icon: "Package", roles: "crew_manager,owner,office_staff" },
+  { href: "/crews", label: "Crews", icon: "HardHat", roles: "administrator,manager" },
+  { href: "/inventory", label: "Inventory", icon: "Package", roles: "administrator,manager" },
   { href: "/reviews", label: "Reviews", icon: "Star", roles: "all" },
-  { href: "/reports", label: "Reports", icon: "BarChart3", roles: "owner,sales_manager,office_staff" },
-  { href: "/marketing", label: "Marketing", icon: "Megaphone", roles: "owner,sales_manager" },
-  { href: "/settings", label: "Settings", icon: "Settings", roles: "owner" },
+  { href: "/reports", label: "Reports", icon: "BarChart3", roles: "administrator,manager,marketing" },
+  { href: "/marketing", label: "Marketing", icon: "Megaphone", roles: "administrator,marketing" },
+  { href: "/settings", label: "Settings", icon: "Settings", roles: "administrator" },
 ] as const;
 
 // Default window manufacturers / product lines shipped as blank
@@ -649,3 +679,114 @@ export const NAV_ITEMS = [
 export const DEFAULT_MANUFACTURERS: string[] = [];
 export const DEFAULT_PRODUCT_LINES: string[] = [];
 export const DEFAULT_SERVICE_AREAS: string[] = [];
+
+// ── Team roles (§7, §30) ─────────────────────────────────────────
+export const TEAM_ROLES = [
+  "administrator",
+  "manager",
+  "sales_representative",
+  "marketing",
+] as const;
+export type TeamRole = (typeof TEAM_ROLES)[number];
+export const TEAM_ROLE_LABELS: Record<string, string> = {
+  administrator: "Administrator",
+  manager: "Manager",
+  sales_representative: "Sales Representative",
+  marketing: "Marketing",
+};
+
+// ── Website lead assignment (§12) ────────────────────────────────
+export const ASSIGNMENT_MODES = ["default_manager", "round_robin"] as const;
+export type AssignmentMode = (typeof ASSIGNMENT_MODES)[number];
+export const ASSIGNMENT_MODE_LABELS: Record<string, string> = {
+  default_manager: "Default Manager",
+  round_robin: "Round Robin",
+};
+
+// ── Appointment confirmation (§10) ───────────────────────────────
+export const DEFAULT_CONFIRMATION_EXPIRY_DAYS = 14;
+
+// ── Notification types / statuses (§8, §12, §28) ─────────────────
+export const NOTIFICATION_STATUSES = ["queued", "sent", "failed", "sandbox"] as const;
+export type NotificationStatus = (typeof NOTIFICATION_STATUSES)[number];
+
+// ── Address autocomplete providers (§4) ──────────────────────────
+export const ADDRESS_PROVIDER =
+  process.env.NEXT_PUBLIC_ADDRESS_PROVIDER || "google";
+export const GOOGLE_MAPS_API_KEY = process.env.NEXT_PUBLIC_GOOGLE_MAPS_API_KEY || "";
+
+// US state options for the Lead form State field (§5).
+export const US_STATES = [
+  "AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS",
+  "KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY",
+  "NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC",
+] as const;
+
+// ── Inventory catalog defaults (§18) ─────────────────────────────
+// Editable default Series created on first run when no catalog exists.
+// The 9900 series is described as storm/impact — NO fabricated certifications.
+export const DEFAULT_CATALOG_SERIES = [
+  { name: "4400", description: "Standard series" },
+  { name: "7700", description: "Premium series" },
+  { name: "9900", description: "Storm / impact series" },
+] as const;
+
+// Editable EXAMPLE window types (not immutable enums).
+export const EXAMPLE_WINDOW_TYPES = [
+  "Double Hung",
+  "Single Hung",
+  "Slider",
+  "End-Vent Slider",
+  "Octagon",
+  "Garden Window",
+  "Sliding Glass Door",
+] as const;
+
+// ── Attribute engine (§22) ───────────────────────────────────────
+export const ATTRIBUTE_TYPES = ["select", "number"] as const;
+export type AttributeType = (typeof ATTRIBUTE_TYPES)[number];
+export const ATTRIBUTE_TYPE_LABELS: Record<string, string> = {
+  select: "Select / Dropdown",
+  number: "Numeric Quantity",
+};
+
+// Extensible unit list for numeric attributes (admin can extend later).
+export const ATTRIBUTE_UNITS = [
+  "square_feet",
+  "linear_feet",
+  "each",
+  "pair",
+  "panel",
+  "hour",
+] as const;
+export const ATTRIBUTE_UNIT_LABELS: Record<string, string> = {
+  square_feet: "Square Feet",
+  linear_feet: "Linear Feet",
+  each: "Each",
+  pair: "Pair",
+  panel: "Panel",
+  hour: "Hour",
+};
+
+// ── Inventory quantity modes (§21) ───────────────────────────────
+export const INVENTORY_MODES = ["tracked", "unlimited"] as const;
+export type InventoryMode = (typeof INVENTORY_MODES)[number];
+export const INVENTORY_MODE_LABELS: Record<string, string> = {
+  tracked: "Tracked Quantity",
+  unlimited: "Unlimited / Ordered Per Job",
+};
+
+// ── Quote statuses allowed transitions (§15) ─────────────────────
+// Draft is the default. Simple forward/lateral transition guard.
+export const QUOTE_STATUS_TRANSITIONS: Record<string, string[]> = {
+  draft: ["draft", "sent", "declined", "expired"],
+  sent: ["sent", "viewed", "accepted", "declined", "expired"],
+  viewed: ["viewed", "accepted", "declined", "expired"],
+  accepted: ["accepted"],
+  declined: ["declined", "draft"],
+  expired: ["expired", "draft"],
+};
+export function canTransitionQuote(from: string, to: string): boolean {
+  if (from === to) return true;
+  return (QUOTE_STATUS_TRANSITIONS[from] || []).includes(to);
+}

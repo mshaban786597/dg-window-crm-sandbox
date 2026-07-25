@@ -33,6 +33,21 @@ import type {
 } from "./form-types";
 import { createModuleActions } from "./crm-modules";
 import {
+  createExtendedActions,
+  extendedSeed,
+  migrateLeadToContacts,
+} from "./crm-extended";
+import type {
+  TeamMember,
+  NotificationRecord,
+  AppointmentConfirmation,
+  LeadActivity,
+  CatalogSeries,
+  CatalogWindowType,
+  CatalogUniversalRange,
+  CatalogItem,
+} from "@/types/database";
+import {
   computeDashboardStats,
   getLeadSourceStats,
   getLeadsByCity,
@@ -109,6 +124,17 @@ interface CRMState {
   currentUser: Profile;
   toasts: ToastMessage[];
 
+  // Extended state (§3–§30)
+  teamMembers: TeamMember[];
+  currentTeamMemberId: string;
+  notifications: NotificationRecord[];
+  appointmentConfirmations: AppointmentConfirmation[];
+  leadActivities: LeadActivity[];
+  catalogSeries: CatalogSeries[];
+  catalogWindowTypes: CatalogWindowType[];
+  catalogUniversalRanges: CatalogUniversalRange[];
+  catalogItems: CatalogItem[];
+
   setHasHydrated: (v: boolean) => void;
   showToast: (type: "success" | "error", message: string) => void;
   dismissToast: (id: string) => void;
@@ -182,6 +208,11 @@ interface CRMState {
   getPipelineByStage: () => ReturnType<typeof getPipelineByStage>;
 }
 
+// The extended actions (team, contacts, notifications, confirmations, catalog,
+// inventory-based quotes) are typed from their factory's return type.
+type ExtendedActions = ReturnType<typeof createExtendedActions>;
+export type FullCRMState = CRMState & ExtendedActions;
+
 // Clean sandbox: every collection starts empty (see mock-data.ts).
 const seedState = {
   leads: LEADS,
@@ -199,9 +230,10 @@ const seedState = {
   marketingCampaigns: MARKETING_CAMPAIGNS,
   inventoryLogs: INVENTORY_LOGS,
   currentUser: SANDBOX_USER,
+  ...extendedSeed,
 };
 
-export const useCRMStore = create<CRMState>()(
+export const useCRMStore = create<FullCRMState>()(
   persist(
     (set, get) => ({
       _hasHydrated: false,
@@ -221,13 +253,50 @@ export const useCRMStore = create<CRMState>()(
 
       addLead: (data) => {
         const ts = now();
+        const id = generateId("lead");
+        // Normalize repeatable contacts: at least one, exactly one primary.
+        const rawContacts = (data.contacts && data.contacts.length ? data.contacts : []).map((c) => ({
+          ...c,
+          id: c.id || generateId("contact"),
+          lead_id: id,
+          created_at: c.created_at || ts,
+        }));
+        if (rawContacts.length === 0) {
+          const [first, ...rest] = (data.full_name || "").trim().split(/\s+/);
+          rawContacts.push({
+            id: generateId("contact"),
+            lead_id: id,
+            first_name: first || data.full_name || "Contact",
+            last_name: rest.join(" ") || "",
+            phone: data.phone || "",
+            email: data.email,
+            is_primary: true,
+            created_at: ts,
+          });
+        }
+        if (!rawContacts.some((c) => c.is_primary)) rawContacts[0].is_primary = true;
+        const primary = rawContacts.find((c) => c.is_primary)!;
+
         const lead: Lead = {
-          id: generateId("lead"),
           ...data,
+          id,
+          contacts: rawContacts,
+          primary_contact_id: primary.id,
+          full_name: `${primary.first_name} ${primary.last_name}`.trim() || data.full_name || "",
+          phone: primary.phone || data.phone || "",
+          email: primary.email || data.email,
+          county: data.county || data.state || "",
+          state: data.state || data.county || "",
           created_at: ts,
           updated_at: ts,
         };
         set((s) => ({ leads: [lead, ...s.leads] }));
+        get().addLeadActivity(id, "lead_created", `Lead created for ${lead.full_name}`);
+        rawContacts.slice(1).forEach((c) =>
+          get().addLeadActivity(id, "contact_added", `Additional contact added: ${c.first_name} ${c.last_name}`.trim(), c.id)
+        );
+        if (lead.appointment_at) get().addLeadActivity(id, "appointment_scheduled", "Appointment scheduled");
+        if (lead.assigned_estimator_id) get().addLeadActivity(id, "lead_assigned", `Assigned to ${lead.assigned_estimator_name || "rep"}`);
         get().addCommunication({
           entity_type: "lead",
           entity_id: lead.id,
@@ -335,18 +404,15 @@ export const useCRMStore = create<CRMState>()(
           service_type: data.service_type,
           status: data.status,
           scope_of_work: data.scope_of_work,
+          notes: data.scope_of_work,
           line_items: lineItems,
+          items: [],
           subtotal,
           discount: data.discount || 0,
           tax,
-          deposit_amount: data.deposit_amount,
           total,
-          optional_upgrades: data.optional_upgrades,
-          financing_option: data.financing_option,
-          production_lead_time: data.production_lead_time,
-          installation_duration: data.installation_duration,
-          warranty_notes: data.warranty_notes,
-          expires_at: data.expires_at,
+          subtotal_cents: Math.round(total * 100),
+          total_cents: Math.round(total * 100),
           customer_notes: data.customer_notes,
           internal_notes: data.internal_notes,
           sent_at: data.status === "sent" ? ts : undefined,
@@ -388,19 +454,12 @@ export const useCRMStore = create<CRMState>()(
           customer_name: data.customer_name ?? existing.customer_name,
           property_address: data.property_address ?? existing.property_address,
           service_type: data.service_type ?? existing.service_type,
-          scope_of_work: data.scope_of_work ?? existing.scope_of_work,
-          line_items: data.line_items ?? existing.line_items,
-          discount: data.discount ?? existing.discount,
+          scope_of_work: data.scope_of_work ?? existing.scope_of_work ?? existing.notes ?? "",
+          line_items: data.line_items ?? existing.line_items ?? [],
+          discount: data.discount ?? existing.discount ?? 0,
           tax_rate:
             data.tax_rate ??
-            (((existing.tax / Math.max(existing.subtotal - existing.discount, 1)) * 100) || 0),
-          deposit_amount: data.deposit_amount ?? existing.deposit_amount,
-          optional_upgrades: data.optional_upgrades ?? existing.optional_upgrades,
-          financing_option: data.financing_option ?? existing.financing_option,
-          production_lead_time: data.production_lead_time ?? existing.production_lead_time,
-          installation_duration: data.installation_duration ?? existing.installation_duration,
-          warranty_notes: data.warranty_notes ?? existing.warranty_notes,
-          expires_at: data.expires_at ?? existing.expires_at,
+            (((( existing.tax ?? 0) / Math.max((existing.subtotal ?? 0) - (existing.discount ?? 0), 1)) * 100) || 0),
           status: data.status ?? existing.status,
           internal_notes: data.internal_notes ?? existing.internal_notes,
           customer_notes: data.customer_notes ?? existing.customer_notes,
@@ -418,6 +477,8 @@ export const useCRMStore = create<CRMState>()(
                   subtotal,
                   tax,
                   total,
+                  total_cents: Math.round(total * 100),
+                  subtotal_cents: Math.round(subtotal * 100),
                   updated_at: ts,
                   sent_at: data.status === "sent" && !q.sent_at ? ts : q.sent_at,
                 }
@@ -451,7 +512,7 @@ export const useCRMStore = create<CRMState>()(
         const customer = get().customers.find((c) => c.id === quote.customer_id);
         const lead = quote.lead_id ? get().leads.find((l) => l.id === quote.lead_id) : null;
         const ts = now();
-        const units = quote.line_items
+        const units = (quote.line_items || [])
           .filter((li) => li.category === "window_unit" || li.opening_id)
           .reduce((s, li) => s + (li.quantity || 0), 0);
 
@@ -523,12 +584,30 @@ export const useCRMStore = create<CRMState>()(
       getPipelineByStage: () => getPipelineByStage(get().leads),
 
       ...createModuleActions(set, get as never),
+      ...createExtendedActions(set as never, get as never),
     }),
     {
       name: STORAGE_KEY,
-      version: 1,
-      // Fresh sandbox schema. Never import data from any prior storage key.
-      migrate: (persisted) => persisted as CRMState,
+      version: 3,
+      // v3 (§3/§27): migrate single-contact leads into a contacts[] with one
+      // primary, county → state, and add the new extended collections. Never
+      // imports data from any prior/obsolete storage key.
+      migrate: (persisted, version) => {
+        const s = (persisted || {}) as Partial<FullCRMState>;
+        if (version < 3) {
+          s.leads = (s.leads || []).map((l) => migrateLeadToContacts(l as Lead));
+          s.teamMembers = s.teamMembers?.length ? s.teamMembers : extendedSeed.teamMembers;
+          s.currentTeamMemberId = s.currentTeamMemberId || extendedSeed.currentTeamMemberId;
+          s.notifications = s.notifications || [];
+          s.appointmentConfirmations = s.appointmentConfirmations || [];
+          s.leadActivities = s.leadActivities || [];
+          s.catalogSeries = s.catalogSeries?.length ? s.catalogSeries : extendedSeed.catalogSeries;
+          s.catalogWindowTypes = s.catalogWindowTypes || [];
+          s.catalogUniversalRanges = s.catalogUniversalRanges || [];
+          s.catalogItems = s.catalogItems || [];
+        }
+        return s as FullCRMState;
+      },
       partialize: (state) => ({
         leads: state.leads,
         customers: state.customers,
@@ -544,6 +623,16 @@ export const useCRMStore = create<CRMState>()(
         scheduleEvents: state.scheduleEvents,
         marketingCampaigns: state.marketingCampaigns,
         inventoryLogs: state.inventoryLogs,
+        // extended collections
+        teamMembers: state.teamMembers,
+        currentTeamMemberId: state.currentTeamMemberId,
+        notifications: state.notifications,
+        appointmentConfirmations: state.appointmentConfirmations,
+        leadActivities: state.leadActivities,
+        catalogSeries: state.catalogSeries,
+        catalogWindowTypes: state.catalogWindowTypes,
+        catalogUniversalRanges: state.catalogUniversalRanges,
+        catalogItems: state.catalogItems,
       }),
       onRehydrateStorage: () => (state) => {
         state?.setHasHydrated(true);

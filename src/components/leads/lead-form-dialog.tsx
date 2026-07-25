@@ -1,6 +1,18 @@
 "use client";
 
-import { useEffect, useState } from "react";
+/**
+ * §3/§5/§6/§11 — Add / Edit Lead dialog.
+ *
+ * Maps 1:1 to `LeadFormData`:
+ *  - Repeatable CONTACTS (first/last/phone/email/notes + primary radio).
+ *  - Address via <AddressAutocomplete> populating City / State / ZIP + hidden
+ *    country/lat/lng/formatted_address.
+ *  - Service Requested limited to the four LEAD_SERVICE_OPTIONS (+ custom name).
+ *  - Currency-safe value fields stored as integer cents.
+ *  - Role-gated Marketing Attribution section.
+ * The legacy "Window Project Details (Optional)" qualification block is removed.
+ */
+import { useEffect, useMemo, useState } from "react";
 import {
   Dialog,
   DialogContent,
@@ -14,50 +26,87 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { SelectField } from "@/components/ui/select-field";
-import { useCRMStore, PROFILES } from "@/lib/store/crm-store";
-import { useSettingsStore } from "@/lib/settings/settings-store";
-import type { Lead } from "@/types/database";
-import type { LeadFormData } from "@/lib/store/types";
+import { AddressAutocomplete, type AddressParts } from "@/components/shared/address-autocomplete";
+import { useCRMStore } from "@/lib/store/crm-store";
+import type { Lead, LeadContact } from "@/types/database";
+import type { LeadFormData } from "@/lib/store/form-types";
 import {
   LEAD_STAGES,
   LEAD_STAGE_LABELS,
   LEAD_SOURCES,
   LEAD_SOURCE_LABELS,
-  SERVICES,
-  SERVICE_LABELS,
+  LEAD_SERVICE_OPTIONS,
+  LEAD_SERVICE_LABELS,
   PROPERTY_TYPES,
   PROPERTY_TYPE_LABELS,
   URGENCY_LEVELS,
   URGENCY_LABELS,
-  WINDOW_STYLES,
-  WINDOW_STYLE_LABELS,
-  FRAME_MATERIALS,
-  FRAME_MATERIAL_LABELS,
-  PROJECT_TIMEFRAMES,
-  PROJECT_TIMEFRAME_LABELS,
-  OCCUPANCY,
-  OCCUPANCY_LABELS,
-  CONTACT_METHODS,
-  CONTACT_METHOD_LABELS,
-  LEAD_QUALITY,
-  LEAD_QUALITY_LABELS,
-} from "@/lib/constants";
+  US_STATES,
+} from "@/lib/domain";
+import { activeSalesReps, canViewMarketingFields, canEditMarketingFields } from "@/lib/permissions";
+import { fromCents, toCents } from "@/lib/money";
 
-const EMPTY_FORM: LeadFormData = {
-  full_name: "",
-  phone: "",
-  email: "",
-  address: "",
-  city: "",
-  county: "",
-  zip_code: "",
-  service_requested: SERVICES[0],
-  lead_source: "website_form",
-  urgency: "medium",
-  property_type: "residential",
-  status: "new_lead",
-  notes: "",
-};
+// ── Local helpers ────────────────────────────────────────────────
+const cid = () => `contact-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+
+const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const isValidEmail = (v: string) => EMAIL_RE.test(v.trim());
+const isValidPhone = (v: string) => v.replace(/[^\d]/g, "").length >= 7;
+
+function emptyContact(primary: boolean): LeadContact {
+  return {
+    id: cid(),
+    first_name: "",
+    last_name: "",
+    phone: "",
+    email: "",
+    notes: "",
+    is_primary: primary,
+    created_at: new Date().toISOString(),
+  };
+}
+
+/** Ensure exactly one contact is flagged primary (first wins if none). */
+function normalizeContacts(contacts: LeadContact[]): { contacts: LeadContact[]; primary: LeadContact } {
+  const list = contacts.length > 0 ? contacts : [emptyContact(true)];
+  const withPrimary = list.some((c) => c.is_primary)
+    ? list
+    : list.map((c, i) => ({ ...c, is_primary: i === 0 }));
+  // Collapse to a single primary (keep the first flagged one).
+  let seen = false;
+  const single = withPrimary.map((c) => {
+    if (c.is_primary && !seen) {
+      seen = true;
+      return c;
+    }
+    return { ...c, is_primary: false };
+  });
+  return { contacts: single, primary: single.find((c) => c.is_primary) ?? single[0] };
+}
+
+interface MoneyDraft {
+  property_value: string;
+  building_value: string;
+  estimated_value: string;
+}
+
+const EMPTY_MONEY: MoneyDraft = { property_value: "", building_value: "", estimated_value: "" };
+
+function buildEmptyForm(): LeadFormData {
+  return {
+    contacts: [],
+    address: "",
+    city: "",
+    state: "",
+    zip_code: "",
+    service_requested: LEAD_SERVICE_OPTIONS[0],
+    lead_source: "website_form",
+    urgency: "medium",
+    property_type: "residential",
+    status: "new_lead",
+    notes: "",
+  };
+}
 
 interface LeadFormDialogProps {
   open: boolean;
@@ -69,128 +118,241 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
   const addLead = useCRMStore((s) => s.addLead);
   const updateLead = useCRMStore((s) => s.updateLead);
   const showToast = useCRMStore((s) => s.showToast);
-  const enabledServices = useSettingsStore((s) => s.services).filter((o) => o.enabled);
+  const teamMembers = useCRMStore((s) => s.teamMembers);
+  const currentTeamMemberId = useCRMStore((s) => s.currentTeamMemberId);
 
-  const [form, setForm] = useState<LeadFormData>(EMPTY_FORM);
+  const actingUser = useMemo(
+    () => teamMembers.find((m) => m.id === currentTeamMemberId),
+    [teamMembers, currentTeamMemberId]
+  );
+  const showMarketing = canViewMarketingFields(actingUser);
+  const marketingEditable = canEditMarketingFields(actingUser);
+  const salesReps = useMemo(() => activeSalesReps(teamMembers), [teamMembers]);
+
+  const [contacts, setContacts] = useState<LeadContact[]>([emptyContact(true)]);
+  const [form, setForm] = useState<LeadFormData>(() => buildEmptyForm());
+  const [money, setMoney] = useState<MoneyDraft>(EMPTY_MONEY);
   const [errors, setErrors] = useState<Record<string, string>>({});
   const [saving, setSaving] = useState(false);
-  const [showDetails, setShowDetails] = useState(false);
-
-  const salesReps = PROFILES.filter(
-    (p) => p.role === "estimator" || p.role === "sales_manager" || p.role === "owner"
-  );
-
-  const serviceOptions =
-    enabledServices.length > 0
-      ? enabledServices.map((o) => ({ value: o.value, label: o.label }))
-      : SERVICES.map((s) => ({ value: s, label: SERVICE_LABELS[s] }));
+  const [showMarketingSection, setShowMarketingSection] = useState(false);
 
   useEffect(() => {
+    if (!open) return;
     if (lead) {
+      const loaded = lead.contacts && lead.contacts.length > 0
+        ? lead.contacts.map((c) => ({ ...c }))
+        : [
+            {
+              ...emptyContact(true),
+              first_name: (lead.full_name || "").split(/\s+/)[0] || lead.full_name || "",
+              last_name: (lead.full_name || "").split(/\s+/).slice(1).join(" "),
+              phone: lead.phone || "",
+              email: lead.email || "",
+            },
+          ];
+      setContacts(loaded);
       setForm({
-        full_name: lead.full_name,
-        phone: lead.phone,
-        email: lead.email || "",
-        address: lead.address,
-        city: lead.city,
-        county: lead.county,
-        zip_code: lead.zip_code,
+        contacts: loaded,
+        primary_contact_id: lead.primary_contact_id,
+        address: lead.address || "",
+        city: lead.city || "",
+        state: lead.state || lead.county || "",
+        zip_code: lead.zip_code || "",
+        country: lead.country,
+        latitude: lead.latitude,
+        longitude: lead.longitude,
+        formatted_address: lead.formatted_address,
         service_requested: lead.service_requested,
+        custom_service_name: lead.custom_service_name || "",
         lead_source: lead.lead_source,
         urgency: lead.urgency,
         property_type: lead.property_type,
-        preferred_appointment_date: lead.preferred_appointment_date?.slice(0, 16) || "",
+        property_value_cents: lead.property_value_cents,
+        building_value_cents: lead.building_value_cents,
+        estimated_value_cents: lead.estimated_value_cents,
+        pa_verified: lead.pa_verified,
+        appointment_at: lead.appointment_at
+          ? toLocalInput(lead.appointment_at)
+          : undefined,
         assigned_estimator_id: lead.assigned_estimator_id || "",
         assigned_estimator_name: lead.assigned_estimator_name || "",
         notes: lead.notes || "",
         status: lead.status,
-        estimated_project_value: lead.estimated_project_value,
-        window_opening_count: lead.window_opening_count,
-        preferred_window_style: lead.preferred_window_style || "",
-        preferred_frame_material: lead.preferred_frame_material || "",
-        impact_interest: lead.impact_interest,
-        energy_efficiency_interest: lead.energy_efficiency_interest,
-        financing_interest: lead.financing_interest,
-        project_timeframe: lead.project_timeframe || "",
-        occupancy: lead.occupancy || "",
-        decision_maker: lead.decision_maker,
-        preferred_contact_method: lead.preferred_contact_method || "",
-        lead_quality: lead.lead_quality,
-        next_follow_up_date: lead.next_follow_up_date?.slice(0, 10) || "",
         campaign_name: lead.campaign_name || "",
+        referral_partner: lead.referral_partner || "",
         utm_source: lead.utm_source || "",
         utm_medium: lead.utm_medium || "",
         utm_campaign: lead.utm_campaign || "",
-        referral_partner: lead.referral_partner || "",
       });
-      const hasDetails = Boolean(
-        lead.window_opening_count ||
-          lead.preferred_window_style ||
-          lead.preferred_frame_material ||
-          lead.impact_interest ||
-          lead.energy_efficiency_interest ||
-          lead.financing_interest ||
-          lead.project_timeframe ||
-          lead.occupancy ||
-          lead.decision_maker ||
-          lead.preferred_contact_method ||
-          lead.lead_quality ||
-          lead.next_follow_up_date ||
+      setMoney({
+        property_value: lead.property_value_cents ? String(fromCents(lead.property_value_cents)) : "",
+        building_value: lead.building_value_cents ? String(fromCents(lead.building_value_cents)) : "",
+        estimated_value: lead.estimated_value_cents ? String(fromCents(lead.estimated_value_cents)) : "",
+      });
+      setShowMarketingSection(
+        Boolean(
           lead.campaign_name ||
-          lead.utm_source ||
-          lead.utm_medium ||
-          lead.utm_campaign ||
-          lead.referral_partner
+            lead.referral_partner ||
+            lead.utm_source ||
+            lead.utm_medium ||
+            lead.utm_campaign
+        )
       );
-      setShowDetails(hasDetails);
     } else {
-      setForm(EMPTY_FORM);
-      setShowDetails(false);
+      const fresh = [emptyContact(true)];
+      setContacts(fresh);
+      setForm(buildEmptyForm());
+      setMoney(EMPTY_MONEY);
+      setShowMarketingSection(false);
     }
     setErrors({});
   }, [lead, open]);
 
-  const validate = (): boolean => {
+  const set = <K extends keyof LeadFormData>(key: K, value: LeadFormData[K]) =>
+    setForm((f) => ({ ...f, [key]: value }));
+
+  // ── Contact editing ────────────────────────────────────────────
+  const updateContact = (id: string, patch: Partial<LeadContact>) =>
+    setContacts((list) => list.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+
+  const addContact = () => setContacts((list) => [...list, emptyContact(false)]);
+
+  const removeContact = (id: string) =>
+    setContacts((list) => {
+      const target = list.find((c) => c.id === id);
+      // Guard: the primary cannot be removed unless another is primary first.
+      if (target?.is_primary) {
+        showToast("error", "Make another contact primary before removing this one.");
+        return list;
+      }
+      const next = list.filter((c) => c.id !== id);
+      return next.length > 0 ? next : [emptyContact(true)];
+    });
+
+  const makePrimary = (id: string) =>
+    setContacts((list) => list.map((c) => ({ ...c, is_primary: c.id === id })));
+
+  // ── Address selection from provider ────────────────────────────
+  const handleAddressSelect = (parts: AddressParts) => {
+    setForm((f) => ({
+      ...f,
+      address: parts.street_address || f.address,
+      city: parts.city || f.city,
+      state: parts.state || f.state,
+      zip_code: parts.zip || f.zip_code,
+      country: parts.country,
+      latitude: parts.latitude,
+      longitude: parts.longitude,
+      formatted_address: parts.formatted_address,
+    }));
+  };
+
+  // ── Validation ─────────────────────────────────────────────────
+  const validate = (normalized: { contacts: LeadContact[]; primary: LeadContact }): boolean => {
     const e: Record<string, string> = {};
-    if (!form.full_name.trim()) e.full_name = "Full name is required";
-    if (!form.phone.trim()) e.phone = "Phone is required";
+    if (normalized.contacts.length === 0) e.contacts = "At least one contact is required";
+
+    normalized.contacts.forEach((c) => {
+      if (!c.first_name.trim()) e[`c-${c.id}-first`] = "First name is required";
+      if (c.phone.trim() && !isValidPhone(c.phone)) e[`c-${c.id}-phone`] = "Enter a valid phone";
+      if (c.email && c.email.trim() && !isValidEmail(c.email)) e[`c-${c.id}-email`] = "Enter a valid email";
+    });
+    // The primary must have a phone (drives the lead's contact number).
+    if (normalized.primary && !normalized.primary.phone.trim())
+      e[`c-${normalized.primary.id}-phone`] = "Primary contact needs a phone";
+
+    if (form.service_requested === "custom" && !(form.custom_service_name || "").trim())
+      e.custom_service_name = "Custom service name is required";
+
     setErrors(e);
     if (Object.keys(e).length > 0) {
-      showToast("error", "Please fill in all required fields");
+      showToast("error", "Please fix the highlighted fields");
       return false;
     }
     return true;
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!validate()) return;
+  const handleSubmit = async (ev: React.FormEvent) => {
+    ev.preventDefault();
+    const normalized = normalizeContacts(contacts);
+    if (!validate(normalized)) return;
 
     setSaving(true);
     try {
-      const rep = salesReps.find((p) => p.id === form.assigned_estimator_id);
+      const rep = salesReps.find((r) => r.id === form.assigned_estimator_id);
+      const repName = rep ? `${rep.first_name} ${rep.last_name}`.trim() : "";
+
       const payload: LeadFormData = {
         ...form,
-        assigned_estimator_name: rep?.full_name || form.assigned_estimator_name,
-        preferred_appointment_date: form.preferred_appointment_date
-          ? new Date(form.preferred_appointment_date).toISOString()
+        contacts: normalized.contacts,
+        primary_contact_id: normalized.primary.id,
+        custom_service_name:
+          form.service_requested === "custom" ? (form.custom_service_name || "").trim() : undefined,
+        property_value_cents: money.property_value ? toCents(money.property_value) : undefined,
+        building_value_cents: money.building_value ? toCents(money.building_value) : undefined,
+        estimated_value_cents: money.estimated_value ? toCents(money.estimated_value) : undefined,
+        appointment_at: form.appointment_at
+          ? new Date(form.appointment_at).toISOString()
           : undefined,
-        next_follow_up_date: form.next_follow_up_date
-          ? new Date(form.next_follow_up_date).toISOString()
-          : undefined,
-        estimated_project_value: form.estimated_project_value
-          ? Number(form.estimated_project_value)
-          : undefined,
-        window_opening_count: form.window_opening_count
-          ? Number(form.window_opening_count)
-          : undefined,
+        assigned_estimator_id: form.assigned_estimator_id || undefined,
+        assigned_estimator_name: rep ? repName : undefined,
       };
 
+      let leadId: string;
       if (lead) {
-        updateLead(lead.id, payload);
+        const primary = normalized.primary;
+        updateLead(lead.id, {
+          contacts: normalized.contacts,
+          primary_contact_id: normalized.primary.id,
+          full_name: `${primary.first_name} ${primary.last_name}`.trim(),
+          phone: primary.phone,
+          email: primary.email,
+          address: payload.address,
+          city: payload.city,
+          state: payload.state,
+          county: payload.state || lead.county,
+          zip_code: payload.zip_code,
+          country: payload.country,
+          latitude: payload.latitude,
+          longitude: payload.longitude,
+          formatted_address: payload.formatted_address,
+          service_requested: payload.service_requested,
+          custom_service_name: payload.custom_service_name,
+          lead_source: payload.lead_source,
+          urgency: payload.urgency,
+          property_type: payload.property_type,
+          property_value_cents: payload.property_value_cents,
+          building_value_cents: payload.building_value_cents,
+          estimated_value_cents: payload.estimated_value_cents,
+          pa_verified: payload.pa_verified,
+          appointment_at: payload.appointment_at,
+          assigned_estimator_id: payload.assigned_estimator_id,
+          assigned_estimator_name: payload.assigned_estimator_name,
+          notes: payload.notes,
+          status: payload.status,
+          campaign_name: payload.campaign_name,
+          referral_partner: payload.referral_partner,
+          utm_source: payload.utm_source,
+          utm_medium: payload.utm_medium,
+          utm_campaign: payload.utm_campaign,
+        });
+        leadId = lead.id;
       } else {
-        addLead(payload);
+        const created = addLead(payload);
+        leadId = created.id;
       }
+
+      // §8/§9 — email the assigned rep + manager. Never block save on email.
+      if (payload.assigned_estimator_id) {
+        const result = await useCRMStore.getState().notifyLeadAssignment(leadId);
+        if (result.failed > 0) {
+          showToast(
+            "error",
+            "Lead saved. Assignment email delivery failed for one or more recipients — the lead was saved and can be retried."
+          );
+        }
+      }
+
       onOpenChange(false);
     } catch {
       showToast("error", "Failed to save lead");
@@ -199,40 +361,116 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
     }
   };
 
-  const set = <K extends keyof LeadFormData>(key: K, value: LeadFormData[K]) =>
-    setForm((f) => ({ ...f, [key]: value }));
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{lead ? "Edit Lead" : "Add New Lead"}</DialogTitle>
-          <DialogDescription>
-            Capture window project lead details
-          </DialogDescription>
+          <DialogDescription>Capture window project lead details</DialogDescription>
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="grid gap-4 sm:grid-cols-2">
-          <div className="sm:col-span-2 space-y-1.5">
-            <Label>Full Name *</Label>
-            <Input value={form.full_name} onChange={(e) => set("full_name", e.target.value)} />
-            {errors.full_name && <p className="text-xs text-red-600">{errors.full_name}</p>}
+          {/* ── Contacts (§3) ── */}
+          <div className="sm:col-span-2 space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-sm font-semibold">Contacts</Label>
+              <Button type="button" variant="outline" size="sm" onClick={addContact}>
+                + Add Person
+              </Button>
+            </div>
+            {errors.contacts && <p className="text-xs text-red-600">{errors.contacts}</p>}
+
+            <div className="space-y-3">
+              {contacts.map((c, idx) => (
+                <div key={c.id} className="rounded-lg border p-3 space-y-3">
+                  <div className="flex items-center justify-between">
+                    <label className="flex items-center gap-2 text-sm font-medium">
+                      <input
+                        type="radio"
+                        name="primary_contact"
+                        checked={c.is_primary}
+                        onChange={() => makePrimary(c.id)}
+                      />
+                      {c.is_primary ? "Primary contact" : "Set as primary"}
+                    </label>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="text-red-600"
+                      onClick={() => removeContact(c.id)}
+                      disabled={contacts.length === 1}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="space-y-1.5">
+                      <Label>First Name *</Label>
+                      <Input
+                        value={c.first_name}
+                        onChange={(e) => updateContact(c.id, { first_name: e.target.value })}
+                      />
+                      {errors[`c-${c.id}-first`] && (
+                        <p className="text-xs text-red-600">{errors[`c-${c.id}-first`]}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Last Name</Label>
+                      <Input
+                        value={c.last_name}
+                        onChange={(e) => updateContact(c.id, { last_name: e.target.value })}
+                      />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Phone {c.is_primary ? "*" : ""}</Label>
+                      <Input
+                        value={c.phone}
+                        onChange={(e) => updateContact(c.id, { phone: e.target.value })}
+                      />
+                      {errors[`c-${c.id}-phone`] && (
+                        <p className="text-xs text-red-600">{errors[`c-${c.id}-phone`]}</p>
+                      )}
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label>Email</Label>
+                      <Input
+                        type="email"
+                        value={c.email || ""}
+                        onChange={(e) => updateContact(c.id, { email: e.target.value })}
+                      />
+                      {errors[`c-${c.id}-email`] && (
+                        <p className="text-xs text-red-600">{errors[`c-${c.id}-email`]}</p>
+                      )}
+                    </div>
+                    <div className="sm:col-span-2 space-y-1.5">
+                      <Label>Notes</Label>
+                      <Textarea
+                        rows={2}
+                        value={c.notes || ""}
+                        onChange={(e) => updateContact(c.id, { notes: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                  {idx === 0 && contacts.length > 1 && (
+                    <p className="text-xs text-muted-foreground">
+                      The primary contact&apos;s name and phone represent the lead.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
           </div>
 
-          <div className="space-y-1.5">
-            <Label>Phone *</Label>
-            <Input value={form.phone} onChange={(e) => set("phone", e.target.value)} />
-            {errors.phone && <p className="text-xs text-red-600">{errors.phone}</p>}
-          </div>
-
-          <div className="space-y-1.5">
-            <Label>Email</Label>
-            <Input type="email" value={form.email} onChange={(e) => set("email", e.target.value)} />
-          </div>
-
+          {/* ── Address (§4/§5) ── */}
           <div className="sm:col-span-2 space-y-1.5">
             <Label>Address</Label>
-            <Input value={form.address} onChange={(e) => set("address", e.target.value)} />
+            <AddressAutocomplete
+              value={form.address}
+              onChange={(v) => set("address", v)}
+              onSelect={handleAddressSelect}
+            />
           </div>
 
           <div className="space-y-1.5">
@@ -240,22 +478,38 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
             <Input value={form.city} onChange={(e) => set("city", e.target.value)} />
           </div>
 
-          <div className="space-y-1.5">
-            <Label>County / Region</Label>
-            <Input value={form.county} onChange={(e) => set("county", e.target.value)} />
-          </div>
+          <SelectField
+            label="State"
+            value={form.state || ""}
+            onChange={(v) => set("state", v)}
+            options={[{ value: "", label: "Select state" }, ...US_STATES.map((s) => ({ value: s, label: s }))]}
+          />
 
           <div className="space-y-1.5">
             <Label>ZIP Code</Label>
             <Input value={form.zip_code} onChange={(e) => set("zip_code", e.target.value)} />
           </div>
 
+          {/* ── Service (§6) ── */}
           <SelectField
             label="Service Requested"
             value={form.service_requested}
             onChange={(v) => set("service_requested", v as LeadFormData["service_requested"])}
-            options={serviceOptions}
+            options={LEAD_SERVICE_OPTIONS.map((s) => ({ value: s, label: LEAD_SERVICE_LABELS[s] }))}
           />
+
+          {form.service_requested === "custom" && (
+            <div className="space-y-1.5">
+              <Label>Custom Service Name *</Label>
+              <Input
+                value={form.custom_service_name || ""}
+                onChange={(e) => set("custom_service_name", e.target.value)}
+              />
+              {errors.custom_service_name && (
+                <p className="text-xs text-red-600">{errors.custom_service_name}</p>
+              )}
+            </div>
+          )}
 
           <SelectField
             label="Lead Source"
@@ -286,219 +540,138 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
           />
 
           <SelectField
-            label="Assigned Sales Rep"
+            label="Assigned Sales Representative"
             value={form.assigned_estimator_id || ""}
             onChange={(v) => set("assigned_estimator_id", v)}
             options={[
               { value: "", label: "Unassigned" },
-              ...salesReps.map((p) => ({ value: p.id, label: p.full_name })),
+              ...salesReps.map((r) => ({
+                value: r.id,
+                label: `${r.first_name} ${r.last_name}`.trim(),
+              })),
             ]}
           />
 
+          {/* ── Currency-safe values (§5) ── */}
           <div className="space-y-1.5">
-            <Label>Est. Project Value ($)</Label>
+            <Label>Property Value ($)</Label>
             <Input
               type="number"
               min={0}
-              value={form.estimated_project_value ?? ""}
-              onChange={(e) =>
-                set("estimated_project_value", e.target.value ? Number(e.target.value) : undefined)
-              }
+              step="0.01"
+              value={money.property_value}
+              onChange={(e) => setMoney((m) => ({ ...m, property_value: e.target.value }))}
             />
           </div>
 
           <div className="space-y-1.5">
-            <Label>Preferred Appointment</Label>
+            <Label>Building Value ($)</Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={money.building_value}
+              onChange={(e) => setMoney((m) => ({ ...m, building_value: e.target.value }))}
+            />
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Estimated Project Value ($)</Label>
+            <Input
+              type="number"
+              min={0}
+              step="0.01"
+              value={money.estimated_value}
+              onChange={(e) => setMoney((m) => ({ ...m, estimated_value: e.target.value }))}
+            />
+          </div>
+
+          {/* PA Verified (§5) */}
+          {/* TODO(spec): the source requirement after 'PA Verified' ends
+              mid-sentence ('and a'); no additional unnamed field was invented —
+              needs clarification. */}
+          <div className="flex items-end pb-1.5">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={Boolean(form.pa_verified)}
+                onChange={(e) => set("pa_verified", e.target.checked)}
+              />
+              PA Verified
+            </label>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Appointment Date &amp; Time</Label>
             <Input
               type="datetime-local"
-              value={form.preferred_appointment_date || ""}
-              onChange={(e) => set("preferred_appointment_date", e.target.value)}
+              value={form.appointment_at || ""}
+              onChange={(e) => set("appointment_at", e.target.value)}
             />
           </div>
 
           <div className="sm:col-span-2 space-y-1.5">
             <Label>Notes</Label>
-            <Textarea value={form.notes} onChange={(e) => set("notes", e.target.value)} rows={3} />
+            <Textarea value={form.notes || ""} onChange={(e) => set("notes", e.target.value)} rows={3} />
           </div>
 
-          {/* Optional window project details */}
-          <div className="sm:col-span-2 border-t pt-4">
-            <button
-              type="button"
-              onClick={() => setShowDetails((v) => !v)}
-              className="flex w-full items-center justify-between text-sm font-medium text-primary"
-            >
-              <span>Window project details (optional)</span>
-              <span className="text-muted-foreground">{showDetails ? "Hide" : "Show"}</span>
-            </button>
-          </div>
+          {/* ── Marketing Attribution (§11 — role-gated) ── */}
+          {showMarketing && (
+            <div className="sm:col-span-2 border-t pt-4 space-y-3">
+              <button
+                type="button"
+                onClick={() => setShowMarketingSection((v) => !v)}
+                className="flex w-full items-center justify-between text-sm font-medium text-primary"
+              >
+                <span>Marketing Attribution</span>
+                <span className="text-muted-foreground">{showMarketingSection ? "Hide" : "Show"}</span>
+              </button>
 
-          {showDetails && (
-            <>
-              <div className="space-y-1.5">
-                <Label>Window Openings</Label>
-                <Input
-                  type="number"
-                  min={0}
-                  value={form.window_opening_count ?? ""}
-                  onChange={(e) =>
-                    set(
-                      "window_opening_count",
-                      e.target.value ? Number(e.target.value) : undefined
-                    )
-                  }
-                />
-              </div>
-
-              <SelectField
-                label="Preferred Window Style"
-                value={form.preferred_window_style || ""}
-                onChange={(v) => set("preferred_window_style", v)}
-                options={[
-                  { value: "", label: "Not sure yet" },
-                  ...WINDOW_STYLES.map((s) => ({ value: s, label: WINDOW_STYLE_LABELS[s] })),
-                ]}
-              />
-
-              <SelectField
-                label="Preferred Frame Material"
-                value={form.preferred_frame_material || ""}
-                onChange={(v) => set("preferred_frame_material", v)}
-                options={[
-                  { value: "", label: "Not sure yet" },
-                  ...FRAME_MATERIALS.map((m) => ({ value: m, label: FRAME_MATERIAL_LABELS[m] })),
-                ]}
-              />
-
-              <SelectField
-                label="Project Timeframe"
-                value={form.project_timeframe || ""}
-                onChange={(v) => set("project_timeframe", v)}
-                options={[
-                  { value: "", label: "Unspecified" },
-                  ...PROJECT_TIMEFRAMES.map((t) => ({
-                    value: t,
-                    label: PROJECT_TIMEFRAME_LABELS[t],
-                  })),
-                ]}
-              />
-
-              <SelectField
-                label="Occupancy"
-                value={form.occupancy || ""}
-                onChange={(v) => set("occupancy", v)}
-                options={[
-                  { value: "", label: "Unspecified" },
-                  ...OCCUPANCY.map((o) => ({ value: o, label: OCCUPANCY_LABELS[o] })),
-                ]}
-              />
-
-              <SelectField
-                label="Preferred Contact Method"
-                value={form.preferred_contact_method || ""}
-                onChange={(v) => set("preferred_contact_method", v)}
-                options={[
-                  { value: "", label: "Unspecified" },
-                  ...CONTACT_METHODS.map((c) => ({ value: c, label: CONTACT_METHOD_LABELS[c] })),
-                ]}
-              />
-
-              <SelectField
-                label="Lead Quality"
-                value={form.lead_quality || ""}
-                onChange={(v) =>
-                  set("lead_quality", (v || undefined) as LeadFormData["lead_quality"])
-                }
-                options={[
-                  { value: "", label: "Unrated" },
-                  ...LEAD_QUALITY.map((q) => ({ value: q, label: LEAD_QUALITY_LABELS[q] })),
-                ]}
-              />
-
-              <div className="space-y-1.5">
-                <Label>Next Follow-Up Date</Label>
-                <Input
-                  type="date"
-                  value={form.next_follow_up_date || ""}
-                  onChange={(e) => set("next_follow_up_date", e.target.value)}
-                />
-              </div>
-
-              <div className="sm:col-span-2 grid gap-3 sm:grid-cols-2 rounded-lg border p-3">
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.impact_interest)}
-                    onChange={(e) => set("impact_interest", e.target.checked)}
-                  />
-                  Interested in impact windows
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.energy_efficiency_interest)}
-                    onChange={(e) => set("energy_efficiency_interest", e.target.checked)}
-                  />
-                  Interested in energy efficiency
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.financing_interest)}
-                    onChange={(e) => set("financing_interest", e.target.checked)}
-                  />
-                  Interested in financing
-                </label>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={Boolean(form.decision_maker)}
-                    onChange={(e) => set("decision_maker", e.target.checked)}
-                  />
-                  Is the decision-maker
-                </label>
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Campaign Name</Label>
-                <Input
-                  value={form.campaign_name || ""}
-                  onChange={(e) => set("campaign_name", e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>Referral Partner</Label>
-                <Input
-                  value={form.referral_partner || ""}
-                  onChange={(e) => set("referral_partner", e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>UTM Source</Label>
-                <Input
-                  value={form.utm_source || ""}
-                  onChange={(e) => set("utm_source", e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>UTM Medium</Label>
-                <Input
-                  value={form.utm_medium || ""}
-                  onChange={(e) => set("utm_medium", e.target.value)}
-                />
-              </div>
-
-              <div className="space-y-1.5">
-                <Label>UTM Campaign</Label>
-                <Input
-                  value={form.utm_campaign || ""}
-                  onChange={(e) => set("utm_campaign", e.target.value)}
-                />
-              </div>
-            </>
+              {showMarketingSection && (
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="space-y-1.5">
+                    <Label>Campaign Name</Label>
+                    <Input
+                      value={form.campaign_name || ""}
+                      disabled={!marketingEditable}
+                      onChange={(e) => set("campaign_name", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Referral Partner</Label>
+                    <Input
+                      value={form.referral_partner || ""}
+                      disabled={!marketingEditable}
+                      onChange={(e) => set("referral_partner", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>UTM Source</Label>
+                    <Input
+                      value={form.utm_source || ""}
+                      disabled={!marketingEditable}
+                      onChange={(e) => set("utm_source", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>UTM Medium</Label>
+                    <Input
+                      value={form.utm_medium || ""}
+                      disabled={!marketingEditable}
+                      onChange={(e) => set("utm_medium", e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>UTM Campaign</Label>
+                    <Input
+                      value={form.utm_campaign || ""}
+                      disabled={!marketingEditable}
+                      onChange={(e) => set("utm_campaign", e.target.value)}
+                    />
+                  </div>
+                </div>
+              )}
+            </div>
           )}
 
           <DialogFooter className="sm:col-span-2">
@@ -513,4 +686,14 @@ export function LeadFormDialog({ open, onOpenChange, lead }: LeadFormDialogProps
       </DialogContent>
     </Dialog>
   );
+}
+
+/** Convert a stored ISO timestamp to a value usable by <input type="datetime-local">. */
+function toLocalInput(iso: string): string {
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const pad = (n: number) => String(n).padStart(2, "0");
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(
+    d.getMinutes()
+  )}`;
 }

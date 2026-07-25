@@ -16,6 +16,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { QuickAddMenu } from "./quick-add-menu";
 import { SandboxBadge } from "./sandbox-badge";
+import { RoleSwitcher } from "./role-switcher";
 import { getInitials } from "@/lib/utils";
 import { useCRMStore } from "@/lib/store/crm-store";
 import { AIAssistant } from "@/components/ai/ai-assistant";
@@ -47,6 +48,8 @@ export function Header({ onMenuClick }: HeaderProps) {
       <SandboxBadge className="ml-2" />
 
       <div className="ml-auto flex items-center gap-2">
+        <RoleSwitcher />
+
         <AIAssistant />
 
         <QuickAddMenu />

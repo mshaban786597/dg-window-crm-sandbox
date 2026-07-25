@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP, NAV_ITEMS } from "@/lib/domain";
+import { canSeeNav } from "@/lib/permissions";
 import { useCRMStore } from "@/lib/store/crm-store";
 import { useSettingsStore } from "@/lib/settings/settings-store";
 
@@ -50,13 +51,13 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  const role = useCRMStore((s) => s.currentUser.role);
+  // Nav is gated by the acting team member's role (§30), not the legacy profile.
+  const actingRole = useCRMStore((s) =>
+    s.teamMembers.find((m) => m.id === s.currentTeamMemberId)?.role
+  );
   const companyName = useSettingsStore((s) => s.company.name);
 
-  const visibleNav = NAV_ITEMS.filter((item) => {
-    if (item.roles === "all") return true;
-    return item.roles.split(",").includes(role);
-  });
+  const visibleNav = NAV_ITEMS.filter((item) => canSeeNav(item.roles, actingRole));
 
   return (
     <>

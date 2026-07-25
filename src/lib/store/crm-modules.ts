@@ -427,7 +427,7 @@ export function createModuleActions(set: SetState, get: GetState) {
         get().showToast("error", "Quote not found");
         return null;
       }
-      const items: PurchaseOrderItem[] = quote.line_items
+      const items: PurchaseOrderItem[] = (quote.line_items || [])
         .filter((li) => li.category === "window_unit" || li.opening_id)
         .map((li) => ({
           id: generateId("poi"),

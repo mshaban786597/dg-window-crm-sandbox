@@ -7,7 +7,6 @@ import {
   UserPlus,
   UserCircle,
   CalendarPlus,
-  FilePlus,
   PackageOpen,
   Ruler,
   Hammer,
@@ -26,7 +25,6 @@ import {
 import { LeadFormDialog } from "@/components/leads/lead-form-dialog";
 import { CustomerFormDialog } from "@/components/customers/customer-form-dialog";
 import { EstimateFormDialog } from "@/components/estimates/estimate-form-dialog";
-import { QuoteFormDialog } from "@/components/quotes/quote-form-dialog";
 import { PurchaseOrderFormDialog } from "@/components/orders/purchase-order-form-dialog";
 import { JobFormDialog } from "@/components/jobs/job-form-dialog";
 import { CalendarEventFormDialog } from "@/components/calendar/calendar-event-form-dialog";
@@ -39,7 +37,6 @@ type DialogKey =
   | "lead"
   | "customer"
   | "estimate"
-  | "quote"
   | "order"
   | "job"
   | "calendar"
@@ -49,11 +46,12 @@ type DialogKey =
   | "campaign"
   | null;
 
+// Quotes are always created from a specific Lead (§13/§15), so "Create Quote"
+// lives on the Leads page — not in generic Quick Add.
 const ACTIONS: { key: DialogKey; label: string; icon: typeof Plus }[] = [
   { key: "lead", label: "Add Lead", icon: UserPlus },
   { key: "customer", label: "Add Customer", icon: UserCircle },
   { key: "estimate", label: "Schedule Measurement", icon: Ruler },
-  { key: "quote", label: "Create Quote", icon: FilePlus },
   { key: "order", label: "Create Window Order", icon: PackageOpen },
   { key: "job", label: "Add Job", icon: Hammer },
   { key: "calendar", label: "Add Calendar Event", icon: CalendarPlus },
@@ -89,7 +87,6 @@ export function QuickAddMenu() {
       <LeadFormDialog open={open === "lead"} onOpenChange={(v) => !v && setOpen(null)} />
       <CustomerFormDialog open={open === "customer"} onOpenChange={(v) => !v && setOpen(null)} />
       <EstimateFormDialog open={open === "estimate"} onOpenChange={(v) => !v && setOpen(null)} />
-      <QuoteFormDialog open={open === "quote"} onOpenChange={(v) => !v && setOpen(null)} />
       <PurchaseOrderFormDialog open={open === "order"} onOpenChange={(v) => !v && setOpen(null)} />
       <JobFormDialog open={open === "job"} onOpenChange={(v) => !v && setOpen(null)} />
       <CalendarEventFormDialog open={open === "calendar"} onOpenChange={(v) => !v && setOpen(null)} />
