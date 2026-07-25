@@ -31,7 +31,6 @@ function LeadsPageContent() {
   const leads = useCRMStore((s) => s.leads);
   const quotes = useCRMStore((s) => s.quotes);
   const deleteLead = useCRMStore((s) => s.deleteLead);
-  const createQuoteForLead = useCRMStore((s) => s.createQuoteForLead);
   const hydrated = useCRMStore((s) => s._hasHydrated);
   const enabledServices = useSettingsStore((s) => s.services).filter((o) => o.enabled);
 
@@ -87,8 +86,9 @@ function LeadsPageContent() {
 
   const handleCreateQuote = (lead: Lead, e: React.MouseEvent) => {
     e.stopPropagation();
-    const quote = createQuoteForLead(lead.id);
-    if (quote) router.push(`/leads/${lead.id}/quotes/${quote.id}`);
+    // §8 — navigate to the quote page WITHOUT creating an empty quote. The
+    // quote is persisted only when the user adds an item or saves the page.
+    router.push(`/leads/${lead.id}/quotes/new`);
   };
 
   const openNewLead = () => {

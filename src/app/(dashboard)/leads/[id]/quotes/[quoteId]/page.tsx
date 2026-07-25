@@ -67,6 +67,7 @@ export default function LeadQuotePage({
   const catalogUniversalRanges = useCRMStore((s) => s.catalogUniversalRanges);
   const catalogItems = useCRMStore((s) => s.catalogItems);
 
+  const createQuoteForLead = useCRMStore((s) => s.createQuoteForLead);
   const updateQuoteMeta = useCRMStore((s) => s.updateQuoteMeta);
   const addQuoteItem = useCRMStore((s) => s.addQuoteItem);
   const updateQuoteItemQuantity = useCRMStore((s) => s.updateQuoteItemQuantity);
@@ -79,6 +80,18 @@ export default function LeadQuotePage({
     () => teamMembers.find((m) => m.id === currentTeamMemberId),
     [teamMembers, currentTeamMemberId]
   );
+
+  // §8 — a quote is NOT persisted merely by opening this page. When the route
+  // is `.../quotes/new`, nothing is created until the first real action (add an
+  // item, save a draft, set notes/status). `ensureQuoteId` lazily creates the
+  // quote on that first action and swaps the URL to the real id.
+  const isNew = quoteId === "new";
+  const ensureQuoteId = useCallback((): string | null => {
+    if (quote) return quote.id;
+    const created = createQuoteForLead(leadId);
+    if (created) router.replace(`/leads/${leadId}/quotes/${created.id}`);
+    return created?.id ?? null;
+  }, [quote, createQuoteForLead, leadId, router]);
 
   // ── Local UI state ───────────────────────────────────────────────
   const [notes, setNotes] = useState("");
@@ -115,7 +128,7 @@ export default function LeadQuotePage({
     return () => window.removeEventListener("beforeunload", handler);
   }, [configuratorDirty]);
 
-  const canEdit = canEditQuote(actingUser, quote ?? { owner_id: undefined }, teamMembers);
+  const canEdit = canEditQuote(actingUser, quote ?? { owner_id: lead?.assigned_estimator_id }, teamMembers);
 
   const selectedItem = useMemo(
     () => catalogItems.find((i) => i.id === selectedItemId) ?? null,
@@ -237,7 +250,9 @@ export default function LeadQuotePage({
   }, []);
 
   const handleAddToQuote = useCallback(() => {
-    if (!selectedItem || !priced || !quote) return;
+    if (!selectedItem || !priced) return;
+    const qid = ensureQuoteId();
+    if (!qid) return;
     const { line_total_cents, line_cost_cents } = lineTotals(
       priced.configured_unit_price_cents,
       priced.configured_unit_cost_cents,
@@ -259,13 +274,13 @@ export default function LeadQuotePage({
       line_cost_cents,
     };
     // Editing an existing line: remove the old snapshot then add the new one.
-    if (editingLineId) removeQuoteItem(quote.id, editingLineId);
-    addQuoteItem(quote.id, snapshot);
+    if (editingLineId) removeQuoteItem(qid, editingLineId);
+    addQuoteItem(qid, snapshot);
     closeConfigurator();
   }, [
     selectedItem,
     priced,
-    quote,
+    ensureQuoteId,
     quantity,
     editingLineId,
     seriesName,
@@ -279,25 +294,30 @@ export default function LeadQuotePage({
   // ── Status change (validated transition) ─────────────────────────
   const handleStatusChange = useCallback(
     (next: string) => {
-      if (!quote) return;
+      const current = quote?.status ?? "draft";
       setStatusError(null);
-      if (!canTransitionQuote(quote.status, next)) {
+      if (!canTransitionQuote(current, next)) {
         setStatusError(
-          `Cannot change status from "${QUOTE_STATUS_LABELS[quote.status] ?? quote.status}" to "${
+          `Cannot change status from "${QUOTE_STATUS_LABELS[current] ?? current}" to "${
             QUOTE_STATUS_LABELS[next] ?? next
           }".`
         );
         return;
       }
-      updateQuoteMeta(quote.id, { status: next as (typeof QUOTE_STATUSES)[number] });
+      const qid = ensureQuoteId();
+      if (qid) updateQuoteMeta(qid, { status: next as (typeof QUOTE_STATUSES)[number] });
     },
-    [quote, updateQuoteMeta]
+    [quote, ensureQuoteId, updateQuoteMeta]
   );
 
   const persistNotes = useCallback(() => {
-    if (!quote) return;
-    if ((quote.notes ?? "") !== notes) updateQuoteMeta(quote.id, { notes });
-  }, [quote, notes, updateQuoteMeta]);
+    // Don't create an empty quote just because Notes was focused/blurred.
+    if (!quote && !notes.trim()) return;
+    if ((quote?.notes ?? "") !== notes) {
+      const qid = ensureQuoteId();
+      if (qid) updateQuoteMeta(qid, { notes });
+    }
+  }, [quote, notes, ensureQuoteId, updateQuoteMeta]);
 
   const guardedNavigate = useCallback(
     (href: string) => {
@@ -314,7 +334,8 @@ export default function LeadQuotePage({
     return <div className="py-20 text-center text-muted-foreground">Loading...</div>;
   }
 
-  if (!quote) {
+  // A brand-new (unsaved) quote has no store record yet; render from the lead.
+  if (!quote && !(isNew && lead)) {
     return (
       <div className="py-20 text-center">
         <p className="text-muted-foreground">Quote not found.</p>
@@ -325,8 +346,21 @@ export default function LeadQuotePage({
     );
   }
 
+  // Read-only view model: the persisted quote, or a synthetic draft for `new`.
+  const displayQuote = quote ?? {
+    status: "draft" as const,
+    items: [] as QuoteItem[],
+    customer_name: lead ? leadDisplayName(lead) : "",
+    service_type: lead?.service_requested ?? "custom",
+    property_address: "",
+    notes: "",
+    owner_id: lead?.assigned_estimator_id,
+    total_cents: 0,
+    subtotal_cents: 0,
+  };
+
   // Enforce visibility at the data layer — never render another rep's quote.
-  if (!canViewQuote(actingUser, quote, teamMembers)) {
+  if (!canViewQuote(actingUser, displayQuote, teamMembers)) {
     return (
       <div className="py-20 text-center">
         <p className="text-sm font-semibold text-foreground">Unauthorized</p>
@@ -340,7 +374,7 @@ export default function LeadQuotePage({
     );
   }
 
-  const items = quote.items ?? [];
+  const items = displayQuote.items ?? [];
   const contact = lead ? primaryContact(lead) : undefined;
   const additionalContacts = lead
     ? (lead.contacts ?? []).filter((c) => c.id !== (lead.primary_contact_id ?? contact?.id))
@@ -352,7 +386,7 @@ export default function LeadQuotePage({
   const propertyAddress =
     lead?.formatted_address ||
     [lead?.address, lead?.city, lead?.state, lead?.zip_code].filter(Boolean).join(", ") ||
-    quote.property_address ||
+    displayQuote.property_address ||
     "—";
   const showCost = canViewCost(actingUser, managerCostVisible);
 
@@ -393,7 +427,7 @@ export default function LeadQuotePage({
             )}
           </SummaryRow>
           <SummaryRow label="Primary Customer Name">
-            {contact ? `${contact.first_name} ${contact.last_name}`.trim() : quote.customer_name || "—"}
+            {contact ? `${contact.first_name} ${contact.last_name}`.trim() : displayQuote.customer_name || "—"}
           </SummaryRow>
           <SummaryRow label="Additional Contacts">
             {additionalContacts.length > 0
@@ -404,7 +438,7 @@ export default function LeadQuotePage({
           <SummaryRow label="Service Type">
             {lead
               ? serviceDisplay(lead.service_requested, lead.custom_service_name)
-              : serviceDisplay(quote.service_type)}
+              : serviceDisplay(displayQuote.service_type)}
           </SummaryRow>
           <SummaryRow label="Assigned Sales Representative">{assignedRep}</SummaryRow>
           <SummaryRow label="Appointment Date & Time">
@@ -428,7 +462,7 @@ export default function LeadQuotePage({
           <CardContent className="space-y-2">
             <SelectField
               label="Status"
-              value={quote.status}
+              value={displayQuote.status}
               disabled={!canEdit}
               onChange={handleStatusChange}
               options={QUOTE_STATUSES.map((s) => ({ value: s, label: QUOTE_STATUS_LABELS[s] }))}
@@ -709,7 +743,7 @@ export default function LeadQuotePage({
                           value={line.quantity}
                           onChange={(e) => {
                             const n = parseInt(e.target.value, 10);
-                            updateQuoteItemQuantity(quote.id, line.id, isNaN(n) || n < 1 ? 1 : n);
+                            if (quote) updateQuoteItemQuantity(quote.id, line.id, isNaN(n) || n < 1 ? 1 : n);
                           }}
                           className="h-8 w-16"
                           title="Quantity"
@@ -728,7 +762,7 @@ export default function LeadQuotePage({
                           size="icon"
                           className="h-8 w-8 text-red-600"
                           title="Remove"
-                          onClick={() => removeQuoteItem(quote.id, line.id)}
+                          onClick={() => quote && removeQuoteItem(quote.id, line.id)}
                         >
                           <Trash2 className="h-3.5 w-3.5" />
                         </Button>
@@ -750,11 +784,11 @@ export default function LeadQuotePage({
         <CardContent className="space-y-2">
           <div className="flex items-center justify-between text-sm">
             <span className="text-muted-foreground">Subtotal</span>
-            <span className="font-medium">{formatCents(quote.subtotal_cents ?? 0)}</span>
+            <span className="font-medium">{formatCents(displayQuote.subtotal_cents ?? 0)}</span>
           </div>
           <div className="flex items-center justify-between border-t pt-2 text-base">
             <span className="font-semibold">Total</span>
-            <span className="font-bold text-brand-blue">{formatCents(quote.total_cents ?? 0)}</span>
+            <span className="font-bold text-brand-blue">{formatCents(displayQuote.total_cents ?? 0)}</span>
           </div>
         </CardContent>
       </Card>
@@ -762,14 +796,15 @@ export default function LeadQuotePage({
       {/* i) Save Draft + Continue */}
       {canEdit && (
         <div className="flex flex-wrap justify-end gap-2">
-          <Button variant="outline" onClick={() => { persistNotes(); saveQuoteDraft(quote.id); }}>
+          <Button variant="outline" onClick={() => { persistNotes(); const qid = ensureQuoteId(); if (qid) saveQuoteDraft(qid); }}>
             Save Draft
           </Button>
           <Button
             className="bg-brand-blue hover:bg-brand-blue-dark"
             onClick={() => {
               persistNotes();
-              saveQuoteDraft(quote.id);
+              const qid = ensureQuoteId();
+              if (qid) saveQuoteDraft(qid);
               router.push(`/leads/${leadId}`);
             }}
           >

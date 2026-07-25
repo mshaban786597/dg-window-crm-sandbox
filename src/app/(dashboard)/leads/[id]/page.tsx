@@ -36,7 +36,6 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   const lead = useCRMStore((s) => s.leads.find((l) => l.id === id));
   const deleteLead = useCRMStore((s) => s.deleteLead);
   const convertLeadToCustomer = useCRMStore((s) => s.convertLeadToCustomer);
-  const createQuoteForLead = useCRMStore((s) => s.createQuoteForLead);
   const quotes = useCRMStore((s) => s.quotes.filter((q) => q.lead_id === id));
   const activities = useCRMStore((s) => s.leadActivities.filter((a) => a.lead_id === id));
   const notifications = useCRMStore((s) => s.notifications.filter((n) => n.lead_id === id));
@@ -92,8 +91,9 @@ export default function LeadDetailPage({ params }: { params: Promise<{ id: strin
   };
 
   const handleCreateQuote = () => {
-    const quote = createQuoteForLead(lead.id);
-    if (quote) router.push(`/leads/${lead.id}/quotes/${quote.id}`);
+    // §8 — no empty quote is created on click; the quote page persists it
+    // lazily on the first real action.
+    router.push(`/leads/${lead.id}/quotes/new`);
   };
 
   // New lead fields (§5/§6)

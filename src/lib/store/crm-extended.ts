@@ -266,9 +266,17 @@ export function createExtendedActions(set: SetState, get: () => ExtendedGetters)
           sent_at: result.status !== "failed" ? now() : undefined,
         };
 
+        // Replace (not append) any prior notification/confirmation for this
+        // (lead, recipient) so a retry is idempotent — no duplicate outbox
+        // entries and no stale pending confirmations (§8/§10).
         set((s) => ({
           notifications: [record, ...s.notifications.filter((n) => n.dedupe_key !== dedupe_key)],
-          appointmentConfirmations: [confirmation, ...s.appointmentConfirmations.filter((c) => c.notification_id !== notifId)],
+          appointmentConfirmations: [
+            confirmation,
+            ...s.appointmentConfirmations.filter(
+              (c) => !(c.lead_id === leadId && c.recipient_user_id === member.id)
+            ),
+          ],
         }));
 
         if (record.status === "failed") {
