@@ -1689,6 +1689,13 @@ BEGIN
   RETURN v_assigned = v_mem;
 END $$;
 
+-- 0003 declared this with different parameter names (p_tenant, p_owner_membership)
+-- and different semantics (it took the owner membership; this takes the quote id
+-- and resolves the owner itself). CREATE OR REPLACE cannot rename parameters, so
+-- the earlier definition is dropped first. Nothing depends on it: 0003 defines it
+-- but never references it, and the quotes policy is recreated below.
+DROP FUNCTION IF EXISTS current_user_can_view_quote(UUID, UUID);
+
 CREATE OR REPLACE FUNCTION current_user_can_view_quote(target_tenant_id UUID, target_quote_id UUID)
 RETURNS BOOLEAN LANGUAGE plpgsql STABLE SECURITY DEFINER SET search_path = public AS $$
 DECLARE v_role tenant_role; v_mem UUID; v_owner UUID;
@@ -1833,12 +1840,6 @@ COMMIT;
 
 -- ============================================================================
 -- Verify (run separately, AFTER the COMMIT above succeeds):
---
---   select count(*) as tables from information_schema.tables
---    where table_schema = 'public';
---
---   select count(*) as rls_policies from pg_policies
---    where schemaname = 'public';
---
---   select count(*) as tenants from tenants;   -- expect 0 or 1
+--   select count(*) from information_schema.tables where table_schema='public';
+--   select count(*) from pg_policies where schemaname='public';
 -- ============================================================================
