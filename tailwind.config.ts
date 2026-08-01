@@ -39,6 +39,14 @@ const config: Config = {
           DEFAULT: "hsl(var(--card))",
           foreground: "hsl(var(--card-foreground))",
         },
+        // --popover/--popover-foreground exist in globals.css but were never
+        // mapped here, so `bg-popover` emitted no rule at all and every
+        // floating surface (dropdown menu, address autocomplete) rendered
+        // transparent with the page showing through it.
+        popover: {
+          DEFAULT: "hsl(var(--popover))",
+          foreground: "hsl(var(--popover-foreground))",
+        },
         sidebar: {
           DEFAULT: "hsl(var(--sidebar))",
           foreground: "hsl(var(--sidebar-foreground))",

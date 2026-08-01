@@ -143,8 +143,11 @@ export default function LeadQuotePage({
   // Live pricing for the current configuration.
   const priced = useMemo(() => {
     if (!selectedItem) return null;
-    return priceConfiguration(selectedItem, selectionInput);
-  }, [selectedItem, selectionInput]);
+    // The size range can carry the base price for its band; without it, items
+    // priced only at the range level configure at $0 (see resolveBasePricing).
+    const range = catalogUniversalRanges.find((r) => r.id === selectedItem.universal_range_id);
+    return priceConfiguration(selectedItem, selectionInput, range);
+  }, [selectedItem, selectionInput, catalogUniversalRanges]);
 
   // Per-attribute numeric validation errors.
   const numericErrors = useMemo<Record<string, string>>(() => {
@@ -264,8 +267,10 @@ export default function LeadQuotePage({
       window_type_snapshot: windowTypeName(selectedItem.window_type_id),
       universal_range_snapshot: rangeLabel(selectedItem.universal_range_id),
       item_name_snapshot: selectedItem.name,
-      base_price_cents_snapshot: selectedItem.base_price_cents,
-      base_cost_cents_snapshot: selectedItem.base_cost_cents,
+      // Snapshot the base actually used, not the item's own (possibly empty)
+      // field — otherwise the immutable record disagrees with the line total.
+      base_price_cents_snapshot: priced.base_price_cents_used,
+      base_cost_cents_snapshot: priced.base_cost_cents_used,
       selections: priced.selections,
       configured_unit_price_cents: priced.configured_unit_price_cents,
       configured_unit_cost_cents: priced.configured_unit_cost_cents,
