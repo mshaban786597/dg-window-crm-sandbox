@@ -15,10 +15,14 @@ import { useParams, useRouter } from "next/navigation";
 import {
   ArrowLeft,
   Building2,
+  Check,
+  Circle,
   Eye,
   KeyRound,
   ShieldAlert,
+  ToggleRight,
   UserCog,
+  UserPlus,
 } from "lucide-react";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -26,7 +30,9 @@ import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { SelectField } from "@/components/ui/select-field";
 import { Textarea } from "@/components/ui/textarea";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
@@ -40,9 +46,17 @@ import {
 import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
 import { useTenantUsageLookup } from "@/lib/tenancy/platform-usage";
 import { maskSecret, maskSensitive, isSupportSessionActive } from "@/lib/tenancy/audit";
-import { planById, planLabel, usePlatformSettingsStore } from "@/lib/tenancy/platform-settings-store";
+import { usePlatformSettingsStore } from "@/lib/tenancy/platform-settings-store";
 import {
+  effectiveSubscription,
+  isFeatureEnabled,
+  onboardingPercent,
+} from "@/lib/tenancy/platform-metrics";
+import { formatCents } from "@/lib/money";
+import {
+  ONBOARDING_STEPS,
   ONBOARDING_STEP_LABELS,
+  TENANT_ROLES,
   TENANT_ROLE_LABELS,
   TENANT_STATUS_LABELS,
 } from "@/lib/tenancy/types";
@@ -50,6 +64,7 @@ import type {
   AuditLogEntry,
   SupportSession,
   TenantMembership,
+  TenantRole,
   TenantStatus,
 } from "@/lib/tenancy/types";
 import { useSettingsStore } from "@/lib/settings/settings-store";
@@ -101,9 +116,28 @@ export default function PlatformTenantDetailPage() {
   const auditLogs = useTenancyStore((s) => s.auditLogs);
   const supportSessions = useTenancyStore((s) => s.supportSessions);
   const startSupport = useTenancyStore((s) => s.startSupport);
+  const endSupport = useTenancyStore((s) => s.endSupport);
+  const suspendTenant = useTenancyStore((s) => s.suspendTenant);
+  const reactivateTenant = useTenancyStore((s) => s.reactivateTenant);
+  const updateTenant = useTenancyStore((s) => s.updateTenant);
+  const updateMembership = useTenancyStore((s) => s.updateMembership);
+  const deactivateMembership = useTenancyStore((s) => s.deactivateMembership);
+  const inviteMember = useTenancyStore((s) => s.inviteMember);
+  const activeSupportSessionId = useTenancyStore((s) => s.activeSupportSessionId);
+  const logAudit = useTenancyStore((s) => s.logAudit);
+  const currentUserId = useTenancyStore((s) => s.currentUserId);
+
   const impersonationAllowed = usePlatformSettingsStore(
     (s) => s.settings.support_impersonation_allowed
   );
+  const plans = usePlatformSettingsStore((s) => s.plans);
+  const subscriptions = usePlatformSettingsStore((s) => s.subscriptions);
+  const entitlements = usePlatformSettingsStore((s) => s.entitlements);
+  const featureFlags = usePlatformSettingsStore((s) => s.featureFlags);
+  const setTenantPlan = usePlatformSettingsStore((s) => s.setTenantPlan);
+  const setSubscriptionStatus = usePlatformSettingsStore((s) => s.setSubscriptionStatus);
+  const setEntitlement = usePlatformSettingsStore((s) => s.setEntitlement);
+  const clearEntitlement = usePlatformSettingsStore((s) => s.clearEntitlement);
   const integrations = useSettingsStore((s) => s.integrations);
   const usageFor = useTenantUsageLookup();
 
@@ -112,6 +146,16 @@ export default function PlatformTenantDetailPage() {
   const [reason, setReason] = useState("");
   const [confirmed, setConfirmed] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [planOpen, setPlanOpen] = useState(false);
+  const [planDraft, setPlanDraft] = useState("");
+  const [lifecycleOpen, setLifecycleOpen] = useState<"suspend" | "reactivate" | null>(null);
+  const [lifecycleReason, setLifecycleReason] = useState("");
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<TenantRole>("sales_representative");
+  const [inviteResult, setInviteResult] = useState<string | null>(null);
+  const [memberError, setMemberError] = useState<string | null>(null);
 
   const tenant = tenants.find((t) => t.id === tenantId);
 
@@ -172,6 +216,21 @@ export default function PlatformTenantDetailPage() {
     return userLabel(manager.user_id);
   };
 
+  /**
+   * Member management runs through the EXISTING tenant-scoped store actions,
+   * which require an active tenant session with owner/admin rights. A platform
+   * admin therefore has to be inside an impersonation support session — no new
+   * bypass is introduced here (hard rule 2).
+   */
+  const canManageMembers = useMemo(() => {
+    const active = supportSessions.find(
+      (x) => x.id === activeSupportSessionId && x.tenant_id === tenantId && isSupportSessionActive(x)
+    );
+    if (!active || active.mode !== "impersonation") return false;
+    const mine = memberships.find((m) => m.tenant_id === tenantId && m.user_id === currentUserId);
+    return Boolean(mine && ["tenant_owner", "tenant_admin"].includes(mine.role));
+  }, [supportSessions, activeSupportSessionId, tenantId, memberships, currentUserId]);
+
   const beginSupport = (mode: "read_only" | "impersonation") => {
     const trimmed = reason.trim();
     if (trimmed.length < 5) {
@@ -219,8 +278,38 @@ export default function PlatformTenantDetailPage() {
   }
 
   const usage = usageFor(tenant.id);
-  const plan = planById(tenant.plan_id);
+  const subscription = effectiveSubscription(tenant, subscriptions);
+  const plan = plans.find((pl) => pl.id === (subscription?.plan_id ?? tenant.plan_id));
+  const planName = plan?.name ?? "Unassigned";
   const activeSupport = tenantSupportSessions.find((s) => isSupportSessionActive(s));
+  const onboardingPct = onboardingPercent(tenant);
+  const completedSteps = new Set(tenant.onboarding_completed_steps);
+
+  const planOptions = [
+    { value: "", label: "Unassigned" },
+    ...plans
+      .filter((pl) => pl.active || pl.id === plan?.id)
+      .map((pl) => ({
+        value: pl.id,
+        label:
+          pl.price_cents === null
+            ? `${pl.name} — custom pricing`
+            : `${pl.name} — ${formatCents(pl.price_cents)}/mo`,
+      })),
+  ];
+
+  const applyPlanChange = () => {
+    if (planDraft) setTenantPlan(tenant.id, planDraft);
+    updateTenant(tenant.id, { plan_id: planDraft || undefined });
+    logAudit({
+      action: "tenant.plan_changed",
+      tenant_id: tenant.id,
+      entity_type: "tenant",
+      entity_id: tenant.id,
+      metadata: { plan_id: planDraft || "none" },
+    });
+    setPlanOpen(false);
+  };
 
   return (
     <div>
@@ -234,7 +323,7 @@ export default function PlatformTenantDetailPage() {
 
       <PageHeader
         title={tenant.name}
-        description={`${tenant.slug} · ${TENANT_STATUS_LABELS[tenant.status]} · ${planLabel(tenant.plan_id)}`}
+        description={`${tenant.slug} · ${TENANT_STATUS_LABELS[tenant.status]} · ${planName}`}
         actions={
           <>
             <Button
@@ -265,14 +354,42 @@ export default function PlatformTenantDetailPage() {
               <UserCog className="h-4 w-4" />
               Impersonate
             </Button>
+            {tenant.status === "suspended" ? (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setLifecycleReason("");
+                  setLifecycleOpen("reactivate");
+                }}
+              >
+                Reactivate
+              </Button>
+            ) : (
+              <Button
+                variant="destructive"
+                onClick={() => {
+                  setLifecycleReason("");
+                  setLifecycleOpen("suspend");
+                }}
+              >
+                Suspend
+              </Button>
+            )}
           </>
         }
       />
 
       {activeSupport && (
-        <div className="mb-6 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          A {activeSupport.mode === "read_only" ? "read-only" : "impersonation"} support session is
-          currently active on this tenant (expires {formatDateTime(activeSupport.expires_at)}).
+        <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span>
+            A {activeSupport.mode === "read_only" ? "read-only" : "impersonation"} support session is
+            currently active on this tenant (expires {formatDateTime(activeSupport.expires_at)}).
+          </span>
+          {activeSupport.id === activeSupportSessionId && (
+            <Button size="sm" variant="outline" onClick={endSupport}>
+              End session
+            </Button>
+          )}
         </div>
       )}
 
@@ -283,6 +400,7 @@ export default function PlatformTenantDetailPage() {
           <TabsTrigger value="usage">Usage</TabsTrigger>
           <TabsTrigger value="audit">Audit Logs</TabsTrigger>
           <TabsTrigger value="subscription">Subscription</TabsTrigger>
+          <TabsTrigger value="features">Features</TabsTrigger>
           <TabsTrigger value="security">Security</TabsTrigger>
         </TabsList>
 
@@ -304,7 +422,7 @@ export default function PlatformTenantDetailPage() {
                 }
               />
               <Field label="Owner" value={userLabel(tenant.owner_user_id)} />
-              <Field label="Plan" value={planLabel(tenant.plan_id)} />
+              <Field label="Plan" value={planName} />
               <Field label="Timezone" value={tenant.timezone} />
               <Field label="Currency" value={tenant.currency} />
               <Field label="Country / State" value={`${tenant.country || "—"} / ${tenant.state || "—"}`} />
@@ -321,21 +439,78 @@ export default function PlatformTenantDetailPage() {
               />
               <Field label="Onboarding" value={tenant.onboarding_status.replace(/_/g, " ")} />
               <Field
-                label="Completed steps"
+                label="Logo"
                 value={
-                  tenant.onboarding_completed_steps.length === 0
-                    ? "None"
-                    : tenant.onboarding_completed_steps
-                        .map((s) => ONBOARDING_STEP_LABELS[s])
-                        .join(", ")
+                  tenant.logo_url ? (
+                    /* eslint-disable-next-line @next/next/no-img-element */
+                    <img
+                      src={tenant.logo_url}
+                      alt={`${tenant.name} logo`}
+                      className="h-8 w-auto max-w-[140px] object-contain"
+                    />
+                  ) : (
+                    "—"
+                  )
                 }
               />
+            </CardContent>
+          </Card>
+
+          <Card className="mt-4">
+            <CardHeader>
+              <CardTitle className="text-base">Onboarding progress</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="mb-4 flex items-center gap-3">
+                <div className="h-2 flex-1 overflow-hidden rounded-full bg-slate-200">
+                  <div className="h-full bg-brand-blue" style={{ width: onboardingPct + "%" }} />
+                </div>
+                <span className="text-sm font-semibold tabular-nums">{onboardingPct}%</span>
+              </div>
+              <ul className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {ONBOARDING_STEPS.map((step) => {
+                  const done = completedSteps.has(step);
+                  return (
+                    <li key={step} className="flex items-center gap-2 text-sm">
+                      {done ? (
+                        <Check className="h-4 w-4 shrink-0 text-green-600" />
+                      ) : (
+                        <Circle className="h-4 w-4 shrink-0 text-slate-300" />
+                      )}
+                      <span className={done ? "" : "text-muted-foreground"}>
+                        {ONBOARDING_STEP_LABELS[step]}
+                      </span>
+                    </li>
+                  );
+                })}
+              </ul>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* ── Users ────────────────────────────────────────────── */}
         <TabsContent value="users">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+            <p className="text-xs text-muted-foreground">
+              {canManageMembers
+                ? "You are inside an impersonation session — member changes are audited against your platform account."
+                : "Member changes require an active impersonation support session; start one from the header."}
+            </p>
+            <Button
+              size="sm"
+              disabled={!canManageMembers}
+              onClick={() => {
+                setInviteEmail("");
+                setInviteResult(null);
+                setMemberError(null);
+                setInviteOpen(true);
+              }}
+            >
+              <UserPlus className="mr-2 h-4 w-4" />
+              Invite member
+            </Button>
+          </div>
+          {memberError && <p className="mb-3 text-xs text-red-600">{memberError}</p>}
           {tenantMemberships.length === 0 ? (
             <EmptyState
               icon={UserCog}
@@ -386,6 +561,36 @@ export default function PlatformTenantDetailPage() {
                   header: "Last Access",
                   render: (m) => (m.last_accessed_at ? formatDateTime(m.last_accessed_at) : "—"),
                 },
+                {
+                  key: "manage",
+                  header: "Manage",
+                  className: "w-64",
+                  render: (m) => (
+                    <div className="flex items-center gap-2">
+                      <SelectField
+                        aria-label={`Role for ${m.id}`}
+                        value={m.role}
+                        options={TENANT_ROLES.map((r) => ({
+                          value: r,
+                          label: TENANT_ROLE_LABELS[r],
+                        }))}
+                        disabled={!canManageMembers || m.role === "tenant_owner"}
+                        onChange={(v) => {
+                          const res = updateMembership(m.id, { role: v as TenantRole });
+                          setMemberError(res.ok ? null : (res.reason ?? "Change rejected"));
+                        }}
+                      />
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        disabled={!canManageMembers || !m.active || m.role === "tenant_owner"}
+                        onClick={() => deactivateMembership(m.id)}
+                      >
+                        Deactivate
+                      </Button>
+                    </div>
+                  ),
+                },
               ]}
             />
           )}
@@ -431,7 +636,7 @@ export default function PlatformTenantDetailPage() {
             />
           ) : (
             <DataTable<AuditLogEntry>
-              data={tenantAudit}
+              data={tenantAudit.slice(0, 20)}
               columns={[
                 {
                   key: "when",
@@ -468,17 +673,78 @@ export default function PlatformTenantDetailPage() {
               ]}
             />
           )}
+          {tenantAudit.length > 20 && (
+            <p className="mt-3 text-xs text-muted-foreground">
+              Showing the latest 20 of {tenantAudit.length} entries.{" "}
+              <Link href="/platform-admin/audit" className="text-brand-blue hover:underline">
+                Open the full audit log
+              </Link>
+              .
+            </p>
+          )}
         </TabsContent>
 
         {/* ── Subscription ─────────────────────────────────────── */}
         <TabsContent value="subscription">
           <Card>
-            <CardHeader>
+            <CardHeader className="flex flex-row items-center justify-between gap-3">
               <CardTitle className="text-base">Subscription</CardTitle>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setPlanDraft(plan?.id ?? "");
+                  setPlanOpen(true);
+                }}
+              >
+                Change plan
+              </Button>
             </CardHeader>
             <CardContent className="grid gap-5 sm:grid-cols-2 lg:grid-cols-3">
-              <Field label="Plan" value={planLabel(tenant.plan_id)} />
-              <Field label="Status" value={TENANT_STATUS_LABELS[tenant.status]} />
+              <Field label="Plan" value={planName} />
+              <Field
+                label="Monthly price"
+                value={
+                  !plan
+                    ? "—"
+                    : plan.price_cents === null
+                      ? "Custom pricing"
+                      : `${formatCents(plan.price_cents)}/mo`
+                }
+              />
+              <Field
+                label="Billing status"
+                value={
+                  subscription ? (
+                    <Badge variant={subscription.status === "active" ? "success" : "warning"}>
+                      {subscription.status.replace(/_/g, " ")}
+                    </Badge>
+                  ) : (
+                    "No subscription"
+                  )
+                }
+              />
+              <Field
+                label="Source"
+                value={
+                  subscription
+                    ? subscription.derived
+                      ? "Derived from the company's plan (no billing record yet)"
+                      : "Explicit billing record"
+                    : "—"
+                }
+              />
+              <Field
+                label="Period end"
+                value={
+                  subscriptions.find((x) => x.tenant_id === tenant.id)?.current_period_end
+                    ? formatDate(
+                        subscriptions.find((x) => x.tenant_id === tenant.id)!.current_period_end!
+                      )
+                    : "—"
+                }
+              />
+              <Field label="Lifecycle status" value={TENANT_STATUS_LABELS[tenant.status]} />
               <Field
                 label="Trial ends"
                 value={tenant.trial_ends_at ? formatDate(tenant.trial_ends_at) : "—"}
@@ -502,6 +768,95 @@ export default function PlatformTenantDetailPage() {
                 label="Audit retention"
                 value={plan ? `${plan.audit_retention_days} days` : "—"}
               />
+            </CardContent>
+          </Card>
+
+          {subscriptions.some((x) => x.tenant_id === tenant.id) && (
+            <Card className="mt-4">
+              <CardHeader>
+                <CardTitle className="text-base">Billing status</CardTitle>
+              </CardHeader>
+              <CardContent className="flex flex-wrap gap-2">
+                {(["trialing", "active", "past_due", "cancelled"] as const).map((st) => (
+                  <Button
+                    key={st}
+                    size="sm"
+                    variant={subscription?.status === st ? "default" : "outline"}
+                    onClick={() => setSubscriptionStatus(tenant.id, st)}
+                  >
+                    {st.replace(/_/g, " ")}
+                  </Button>
+                ))}
+              </CardContent>
+            </Card>
+          )}
+        </TabsContent>
+
+        {/* ── Feature entitlements ─────────────────────────────── */}
+        <TabsContent value="features">
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-base">
+                <ToggleRight className="h-4 w-4" />
+                Feature entitlements
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              {featureFlags.length === 0 ? (
+                <EmptyState
+                  icon={ToggleRight}
+                  title="No features defined"
+                  description="Feature flags are managed under Platform → Feature Flags."
+                />
+              ) : (
+                <div className="space-y-2">
+                  {featureFlags.map((f) => {
+                    const override = entitlements.find(
+                      (e) => e.tenant_id === tenant.id && e.feature_key === f.key
+                    );
+                    const enabled = isFeatureEnabled(f.key, tenant.id, featureFlags, entitlements);
+                    return (
+                      <div
+                        key={f.key}
+                        className="flex flex-wrap items-center justify-between gap-3 rounded-lg border p-3"
+                      >
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium">{f.key}</p>
+                          <p className="truncate text-xs text-muted-foreground">
+                            {f.description || "No description"} ·{" "}
+                            {override
+                              ? "company override"
+                              : f.enabled_globally
+                                ? "global default: on"
+                                : "global default: off"}
+                          </p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Badge variant={enabled ? "success" : "secondary"}>
+                            {enabled ? "Enabled" : "Disabled"}
+                          </Badge>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={() => setEntitlement(tenant.id, f.key, !enabled)}
+                          >
+                            {enabled ? "Disable" : "Enable"}
+                          </Button>
+                          {override && (
+                            <Button
+                              size="sm"
+                              variant="ghost"
+                              onClick={() => clearEntitlement(tenant.id, f.key)}
+                            >
+                              Reset
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </CardContent>
           </Card>
         </TabsContent>
@@ -750,6 +1105,148 @@ export default function PlatformTenantDetailPage() {
               onClick={() => beginSupport("impersonation")}
             >
               Start impersonation
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Change plan. */}
+      <Dialog open={planOpen} onOpenChange={setPlanOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Change plan for {tenant.name}</DialogTitle>
+            <DialogDescription>
+              The change is written to the company&apos;s subscription and recorded in the audit log.
+            </DialogDescription>
+          </DialogHeader>
+          <SelectField
+            label="Plan"
+            value={planDraft}
+            options={planOptions}
+            onChange={setPlanDraft}
+          />
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPlanOpen(false)}>
+              Cancel
+            </Button>
+            <Button onClick={applyPlanChange}>Save plan</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Suspend / reactivate — reason required on suspension. */}
+      <Dialog
+        open={lifecycleOpen !== null}
+        onOpenChange={(open) => {
+          if (!open) setLifecycleOpen(null);
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>
+              {lifecycleOpen === "suspend" ? "Suspend" : "Reactivate"} {tenant.name}?
+            </DialogTitle>
+            <DialogDescription>
+              {lifecycleOpen === "suspend"
+                ? "Every user of this company immediately loses access. The reason is stored on the audit entry."
+                : "Access is restored for all active members. The change is audited."}
+            </DialogDescription>
+          </DialogHeader>
+          {lifecycleOpen === "suspend" && (
+            <div className="space-y-1.5">
+              <Label htmlFor="lifecycle-reason">Reason</Label>
+              <Textarea
+                id="lifecycle-reason"
+                value={lifecycleReason}
+                onChange={(e) => setLifecycleReason(e.target.value)}
+                placeholder="e.g. Non-payment after 3 reminders (ticket #1420)"
+              />
+              {error && <p className="text-xs text-red-600">{error}</p>}
+            </div>
+          )}
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setLifecycleOpen(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant={lifecycleOpen === "suspend" ? "destructive" : "default"}
+              onClick={() => {
+                if (lifecycleOpen === "suspend") {
+                  if (lifecycleReason.trim().length < 5) {
+                    setError("A reason of at least 5 characters is required.");
+                    return;
+                  }
+                  suspendTenant(tenant.id, lifecycleReason.trim());
+                } else {
+                  reactivateTenant(tenant.id);
+                }
+                setError(null);
+                setLifecycleOpen(null);
+              }}
+            >
+              {lifecycleOpen === "suspend" ? "Suspend company" : "Reactivate"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Invite a member (requires an active impersonation session). */}
+      <Dialog open={inviteOpen} onOpenChange={setInviteOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Invite a member to {tenant.name}</DialogTitle>
+            <DialogDescription>
+              Only the invitation token HASH is stored. The single-use link below is shown once and
+              is never recoverable afterwards.
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-3">
+            <div className="space-y-1.5">
+              <Label htmlFor="invite-email">Email</Label>
+              <Input
+                id="invite-email"
+                type="email"
+                value={inviteEmail}
+                onChange={(e) => setInviteEmail(e.target.value)}
+                placeholder="name@company.com"
+              />
+            </div>
+            <SelectField
+              label="Role"
+              value={inviteRole}
+              options={TENANT_ROLES.filter((r) => r !== "tenant_owner").map((r) => ({
+                value: r,
+                label: TENANT_ROLE_LABELS[r],
+              }))}
+              onChange={(v) => setInviteRole(v as TenantRole)}
+            />
+            {inviteResult && (
+              <p className="break-all rounded-lg bg-slate-100 p-3 text-xs">{inviteResult}</p>
+            )}
+            {memberError && <p className="text-xs text-red-600">{memberError}</p>}
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setInviteOpen(false)}>
+              Close
+            </Button>
+            <Button
+              onClick={() => {
+                if (!/.+@.+\..+/.test(inviteEmail.trim())) {
+                  setMemberError("Enter a valid email address.");
+                  return;
+                }
+                const res = inviteMember(inviteEmail.trim(), inviteRole);
+                if (!res) {
+                  setMemberError(
+                    "Invitation rejected — an active impersonation session with owner/admin rights is required."
+                  );
+                  return;
+                }
+                setMemberError(null);
+                setInviteResult(`Invite link: /invite/${res.token}`);
+              }}
+            >
+              Send invitation
             </Button>
           </DialogFooter>
         </DialogContent>

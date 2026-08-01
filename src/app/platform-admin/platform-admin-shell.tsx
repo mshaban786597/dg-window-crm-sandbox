@@ -23,9 +23,13 @@ import {
   Settings,
   ShieldCheck,
   LogOut,
+  Users,
+  ToggleRight,
+  LifeBuoy,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePlatformSettingsStore } from "@/lib/tenancy/platform-settings-store";
+import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
 import { platformSignOutAction } from "./actions";
 
 interface PlatformNavItem {
@@ -33,14 +37,19 @@ interface PlatformNavItem {
   label: string;
   icon: React.ComponentType<{ className?: string }>;
   exact?: boolean;
+  /** Deliverable 10: live count rendered beside the label. */
+  badge?: "companies";
 }
 
 const PLATFORM_NAV: PlatformNavItem[] = [
   { href: "/platform-admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
-  { href: "/platform-admin/companies", label: "Companies", icon: Building2 },
+  { href: "/platform-admin/companies", label: "Companies", icon: Building2, badge: "companies" },
+  { href: "/platform-admin/users", label: "Platform Users", icon: Users },
+  { href: "/platform-admin/plans", label: "Plans & Billing", icon: Layers },
+  { href: "/platform-admin/features", label: "Feature Flags", icon: ToggleRight },
   { href: "/platform-admin/audit", label: "Audit Logs", icon: ScrollText },
   { href: "/platform-admin/events", label: "System Events", icon: AlertTriangle },
-  { href: "/platform-admin/plans", label: "Plans & Flags", icon: Layers },
+  { href: "/platform-admin/support", label: "Support", icon: LifeBuoy },
   { href: "/platform-admin/settings", label: "Settings", icon: Settings },
 ];
 
@@ -80,6 +89,12 @@ export function PlatformAdminShell({
 }: PlatformAdminShellProps) {
   const pathname = usePathname();
   const productName = usePlatformSettingsStore((s) => s.settings.product_name);
+  /** Live company count for the Companies badge (Deliverable 10). Zero on an
+   *  empty platform — never a placeholder. */
+  const companyCount = useTenancyStore((s) => s.tenants.length);
+
+  const badgeValue = (item: PlatformNavItem) =>
+    item.badge === "companies" ? companyCount : null;
 
   const isActive = (item: PlatformNavItem) =>
     item.exact ? pathname === item.href : pathname === item.href || pathname.startsWith(`${item.href}/`);
@@ -138,7 +153,17 @@ export function PlatformAdminShell({
                 )}
               >
                 <Icon className="h-4 w-4 shrink-0" />
-                {item.label}
+                <span className="flex-1 truncate">{item.label}</span>
+                {badgeValue(item) !== null && (
+                  <span
+                    className={cn(
+                      "rounded-full px-1.5 py-0.5 text-[10px] font-bold tabular-nums",
+                      isActive(item) ? "bg-white/25 text-white" : "bg-slate-800 text-slate-300"
+                    )}
+                  >
+                    {badgeValue(item)}
+                  </span>
+                )}
               </Link>
             );
           })}
@@ -186,6 +211,11 @@ export function PlatformAdminShell({
               )}
             >
               {item.label}
+              {badgeValue(item) !== null && (
+                <span className="ml-1.5 rounded-full bg-white/20 px-1.5 py-0.5 text-[10px] font-bold tabular-nums">
+                  {badgeValue(item)}
+                </span>
+              )}
             </Link>
           ))}
         </nav>

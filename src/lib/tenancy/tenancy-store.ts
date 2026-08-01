@@ -20,6 +20,7 @@ import type {
   ActiveSession,
   AuditLogEntry,
   PlatformUser,
+  PlatformRole,
   SupportMode,
   SupportSession,
   SystemEvent,
@@ -105,6 +106,12 @@ interface TenancyState {
 
   logAudit: (input: AuditInput) => void;
   bootstrapPlatformAdmin: (email: string) => boolean;
+
+  // ── Platform-admin operations (admin panel Deliverables 2, 4, 7) ──
+  updateTenant: (tenantId: string, patch: Partial<Tenant>) => void;
+  setPlatformRole: (userId: string, role: PlatformRole | undefined) => void;
+  setPlatformUserActive: (userId: string, active: boolean) => void;
+  resolveSystemEvent: (eventId: string, resolved: boolean) => void;
 }
 
 /** Deterministic sandbox seed: one platform admin, zero tenants (§5). */
@@ -550,6 +557,78 @@ export const useTenancyStore = create<TenancyState>()(
         const session = get().resolveSession();
         const entry = buildAuditEntry(session, input);
         set((st) => ({ auditLogs: [entry, ...st.auditLogs] }));
+      },
+
+      // ── Platform-admin operations ────────────────────────────────
+      /** Platform-admin only. Identity fields are never editable here. */
+      updateTenant: (tenantId, patch) => {
+        const s = get();
+        if (!s.users.find((u) => u.id === s.currentUserId)?.platform_role) return;
+        const { id: _id, owner_user_id: _owner, created_at: _created, ...safe } = patch;
+        void _id;
+        void _owner;
+        void _created;
+        set((st) => ({
+          tenants: st.tenants.map((t) =>
+            t.id === tenantId ? { ...t, ...safe, updated_at: now() } : t
+          ),
+        }));
+      },
+
+      /**
+       * Promote/demote a platform operator. Requires an EXISTING super admin —
+       * this is deliberately not a self-service escalation path (§3, §25).
+       */
+      setPlatformRole: (userId, role) => {
+        const s = get();
+        const actor = s.users.find((u) => u.id === s.currentUserId);
+        if (actor?.platform_role !== "platform_super_admin") return;
+        if (actor.id === userId) return; // cannot demote yourself out of the console
+        set((st) => ({
+          users: st.users.map((u) =>
+            u.id === userId ? { ...u, platform_role: role, updated_at: now() } : u
+          ),
+        }));
+        get().logAudit({
+          action: "security.setting_changed",
+          tenant_id: null,
+          entity_type: "platform_user",
+          entity_id: userId,
+          metadata: { platform_role: role ?? "none" },
+        });
+      },
+
+      setPlatformUserActive: (userId, active) => {
+        const s = get();
+        const actor = s.users.find((u) => u.id === s.currentUserId);
+        if (actor?.platform_role !== "platform_super_admin") return;
+        if (actor.id === userId) return; // cannot lock yourself out
+        set((st) => ({
+          users: st.users.map((u) => (u.id === userId ? { ...u, active, updated_at: now() } : u)),
+        }));
+        get().logAudit({
+          action: active ? "security.setting_changed" : "user.deactivated",
+          tenant_id: null,
+          entity_type: "platform_user",
+          entity_id: userId,
+          metadata: { active },
+        });
+      },
+
+      /** Acknowledge/resolve a system event. Events are never deleted. */
+      resolveSystemEvent: (eventId, resolved) => {
+        const s = get();
+        const actor = s.users.find((u) => u.id === s.currentUserId);
+        if (!actor?.platform_role) return;
+        set((st) => ({
+          systemEvents: st.systemEvents.map((e) =>
+            e.id === eventId
+              ? resolved
+                ? { ...e, resolved_at: now(), resolved_by: actor.id }
+                : { ...e, resolved_at: undefined, resolved_by: undefined }
+              : e
+          ),
+        }));
       },
 
       // ── §25 Bootstrap (sandbox equivalent of the SQL function) ───

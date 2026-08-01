@@ -102,6 +102,11 @@ export interface PlatformUser {
   phone?: string;
   /** Platform role — undefined for ordinary tenant users. */
   platform_role?: PlatformRole;
+  /**
+   * Platform-level account state. `undefined` is treated as active so existing
+   * records keep working; only an explicit `false` disables the account.
+   */
+  active?: boolean;
   email_verified: boolean;
   last_login_at?: string;
   created_at: string;
