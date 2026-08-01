@@ -1,5 +1,8 @@
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import { useShallow } from "zustand/react/shallow";
+import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
+import { useTenancySession } from "@/lib/tenancy/use-tenancy-session";
 import type {
   Lead,
   Customer,
@@ -36,6 +39,7 @@ import {
   createExtendedActions,
   extendedSeed,
   migrateLeadToContacts,
+  activeTenantId,
 } from "./crm-extended";
 import type {
   TeamMember,
@@ -233,7 +237,11 @@ const seedState = {
   ...extendedSeed,
 };
 
-export const useCRMStore = create<FullCRMState>()(
+/**
+ * Raw, UNSCOPED store. Do not use directly in workspace UI — read through the
+ * `useCRMStore` wrapper below, which applies tenant scoping to every read.
+ */
+export const useCRMStoreRaw = create<FullCRMState>()(
   persist(
     (set, get) => ({
       _hasHydrated: false,
@@ -280,6 +288,8 @@ export const useCRMStore = create<FullCRMState>()(
         const lead: Lead = {
           ...data,
           id,
+          // Stamp the owning tenant on creation (§1) — never taken from input.
+          tenant_id: activeTenantId(),
           contacts: rawContacts,
           primary_contact_id: primary.id,
           full_name: `${primary.first_name} ${primary.last_name}`.trim() || data.full_name || "",
@@ -640,6 +650,82 @@ export const useCRMStore = create<FullCRMState>()(
     }
   )
 );
+
+// ── Tenant scoping at the store boundary (§1, §12) ────────────────
+/**
+ * Collections that are tenant-owned. Reads of these are filtered to the active
+ * tenant so no view — present or future — can render another tenant's rows.
+ */
+const TENANT_OWNED_KEYS = [
+  "leads", "customers", "quotes", "jobs", "estimates", "purchaseOrders",
+  "communications", "reviews", "invoices", "crews", "materials",
+  "scheduleEvents", "marketingCampaigns", "inventoryLogs", "teamMembers",
+  "notifications", "appointmentConfirmations", "leadActivities",
+  "catalogSeries", "catalogWindowTypes", "catalogUniversalRanges", "catalogItems",
+] as const;
+
+/**
+ * Project the raw state onto the active tenant.
+ *
+ * - With an active workspace: only rows whose `tenant_id` matches.
+ * - Without one: only legacy rows that carry NO tenant_id (the pre-tenancy
+ *   sandbox). A signed-in tenant therefore never sees another tenant's data,
+ *   and a session with no workspace never sees any tenant's data.
+ */
+function scopeState(s: FullCRMState, tenantId: string | undefined): FullCRMState {
+  const out = { ...s } as unknown as Record<string, unknown>;
+  for (const key of TENANT_OWNED_KEYS) {
+    const rows = (s as unknown as Record<string, unknown>)[key];
+    if (!Array.isArray(rows)) continue;
+    out[key] = (rows as { tenant_id?: string }[]).filter((r) =>
+      tenantId ? r.tenant_id === tenantId : !r.tenant_id
+    );
+  }
+  return out as unknown as FullCRMState;
+}
+
+function activeTenantIdSafe(): string | undefined {
+  try {
+    return useTenancyStore.getState().resolveSession()?.tenant?.id;
+  } catch {
+    return undefined;
+  }
+}
+
+type CRMStoreHook = {
+  <T>(selector: (state: FullCRMState) => T): T;
+  getState: () => FullCRMState;
+  setState: typeof useCRMStoreRaw.setState;
+  subscribe: typeof useCRMStoreRaw.subscribe;
+  persist: typeof useCRMStoreRaw.persist;
+  /** Escape hatch for platform-admin aggregates that must span tenants. */
+  getRawState: () => FullCRMState;
+};
+
+/**
+ * Tenant-scoped store hook. Drop-in replacement for the raw store: every
+ * component that reads collections gets them already filtered to the active
+ * tenant. `useShallow` keeps the freshly-filtered arrays referentially stable
+ * for React.
+ */
+const useCRMStoreScoped = (<T,>(selector: (state: FullCRMState) => T): T => {
+  // Use the VALIDATED session, not the raw `activeTenantId`. resolveSession()
+  // withholds the tenant when the membership is inactive/unaccepted or the
+  // tenant is suspended/cancelled, so those cases fall through to "no tenant"
+  // and the scope fails closed (§24).
+  const tenantId = useTenancySession()?.tenant?.id;
+  return useCRMStoreRaw(
+    useShallow((s: FullCRMState) => selector(scopeState(s, tenantId)))
+  );
+}) as CRMStoreHook;
+
+useCRMStoreScoped.getState = () => scopeState(useCRMStoreRaw.getState(), activeTenantIdSafe());
+useCRMStoreScoped.getRawState = () => useCRMStoreRaw.getState();
+useCRMStoreScoped.setState = useCRMStoreRaw.setState;
+useCRMStoreScoped.subscribe = useCRMStoreRaw.subscribe;
+useCRMStoreScoped.persist = useCRMStoreRaw.persist;
+
+export const useCRMStore = useCRMStoreScoped;
 
 function formatCurrency(amount: number): string {
   return new Intl.NumberFormat("en-US", {

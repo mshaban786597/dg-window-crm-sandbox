@@ -57,6 +57,9 @@ export interface Profile {
 
 export interface Lead {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   // Legacy single-contact fields — retained for back-compat/display. The
   // authoritative contact data now lives in `contacts` (§3). On migration the
   // old full_name/phone/email become the primary LeadContact.
@@ -128,6 +131,9 @@ export interface Lead {
 
 export interface Customer {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   full_name: string;
   phone: string;
   email?: string;
@@ -181,6 +187,9 @@ export interface WindowOpening {
  */
 export interface Estimate {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   lead_id?: string;
   customer_id?: string;
   customer_name: string;
@@ -234,6 +243,9 @@ export interface QuoteLineItem {
 
 export interface Quote {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   estimate_id?: string;
   lead_id?: string; // §15 — every new quote is associated with a lead
   owner_id?: string; // assigned sales rep (team member) — drives visibility (§14)
@@ -324,6 +336,9 @@ export interface PurchaseOrderItem {
 
 export interface PurchaseOrder {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   quote_id?: string; // accepted quote
   customer_id?: string;
   customer_name: string;
@@ -350,6 +365,9 @@ export interface PurchaseOrder {
 
 export interface Job {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   quote_id?: string;
   estimate_id?: string; // measurement record
   purchase_order_id?: string;
@@ -400,6 +418,9 @@ export interface Job {
 
 export interface Crew {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   name: string;
   lead_name: string;
   phone: string;
@@ -428,6 +449,9 @@ export interface CrewMember {
 
 export interface Material {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   name: string;
   category: string;
   quantity: number;
@@ -441,6 +465,9 @@ export interface Material {
 
 export interface Communication {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   entity_type: "lead" | "customer" | "job";
   entity_id: string;
   type: "call" | "text" | "email" | "note" | "appointment" | "quote" | "job" | "review" | "order";
@@ -452,6 +479,9 @@ export interface Communication {
 
 export interface Review {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   customer_id: string;
   customer_name: string;
   job_id?: string;
@@ -475,6 +505,9 @@ export interface Review {
 
 export interface ScheduleEvent {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   title: string;
   type: CalendarEventType;
   start: string;
@@ -497,6 +530,9 @@ export interface ScheduleEvent {
 
 export interface InventoryLog {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   material_id: string;
   item_name: string;
   action: "add" | "remove" | "assign_job" | "adjust";
@@ -508,6 +544,9 @@ export interface InventoryLog {
 
 export interface MarketingCampaign {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   name: string;
   source: string; // channel
   city?: string;
@@ -540,6 +579,9 @@ export interface Automation {
 
 export interface Invoice {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   job_id: string;
   customer_id: string;
   customer_name: string;
@@ -552,6 +594,9 @@ export interface Invoice {
 // ── §3 Repeatable lead contacts ──────────────────────────────────
 export interface LeadContact {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   lead_id?: string;
   first_name: string;
   last_name: string;
@@ -574,6 +619,9 @@ export interface NotificationPreferences {
 
 export interface TeamMember {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   first_name: string;
   last_name: string;
   email: string;
@@ -595,6 +643,9 @@ export type NotificationKind =
 
 export interface NotificationRecord {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   kind: NotificationKind;
   lead_id: string;
   recipient_user_id?: string;
@@ -613,6 +664,9 @@ export interface NotificationRecord {
 // ── §10 Appointment confirmations ────────────────────────────────
 export interface AppointmentConfirmation {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   notification_id: string;
   lead_id: string;
   recipient_user_id?: string;
@@ -642,6 +696,9 @@ export type LeadActivityType =
 
 export interface LeadActivity {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   lead_id: string;
   type: LeadActivityType;
   actor: string; // user name or "System" / "Website"
@@ -654,6 +711,9 @@ export interface LeadActivity {
 // ── §18–§22 Inventory catalog hierarchy ──────────────────────────
 export interface CatalogSeries {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   name: string;
   description?: string;
   active: boolean;
@@ -664,6 +724,9 @@ export interface CatalogSeries {
 
 export interface CatalogWindowType {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   series_id: string;
   name: string;
   active: boolean;
@@ -674,6 +737,9 @@ export interface CatalogWindowType {
 
 export interface CatalogUniversalRange {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   window_type_id: string;
   label: string;
   min_in: number; // inclusive
@@ -719,6 +785,9 @@ export interface CatalogAttribute {
 
 export interface CatalogItem {
   id: string;
+  /** Owning tenant (§1). Required in the database; optional here only so the
+   * pre-tenant sandbox store migrates cleanly (see crm-store migration v4). */
+  tenant_id?: string;
   name: string;
   series_id: string;
   window_type_id: string;

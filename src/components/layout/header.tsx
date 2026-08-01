@@ -17,6 +17,7 @@ import {
 import { QuickAddMenu } from "./quick-add-menu";
 import { SandboxBadge } from "./sandbox-badge";
 import { RoleSwitcher } from "./role-switcher";
+import { WorkspaceSwitcher } from "@/components/tenancy/workspace-switcher";
 import { getInitials } from "@/lib/utils";
 import { useCRMStore } from "@/lib/store/crm-store";
 import { AIAssistant } from "@/components/ai/ai-assistant";
@@ -48,6 +49,8 @@ export function Header({ onMenuClick }: HeaderProps) {
       <SandboxBadge className="ml-2" />
 
       <div className="ml-auto flex items-center gap-2">
+        <WorkspaceSwitcher />
+
         <RoleSwitcher />
 
         <AIAssistant />
@@ -74,7 +77,7 @@ export function Header({ onMenuClick }: HeaderProps) {
             <DropdownMenuLabel>{user.email}</DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem asChild>
-              <Link href="/settings">Settings</Link>
+              <Link href="/app/settings">Settings</Link>
             </DropdownMenuItem>
             <DropdownMenuItem asChild>
               <Link href="/login">Sign out</Link>

@@ -658,20 +658,23 @@ export const AUTOMATION_TEMPLATES: AutomationTemplate[] = [
 // Measurements come AFTER Quotes, not between Leads and Quotes.
 // `roles` lists the new team roles (see TEAM_ROLES); "all" = every role.
 export const NAV_ITEMS = [
-  { href: "/dashboard", label: "Dashboard", icon: "LayoutDashboard", roles: "all" },
-  { href: "/leads", label: "Leads", icon: "Users", roles: "all" },
-  { href: "/quotes", label: "Quotes", icon: "FileText", roles: "administrator,manager,sales_representative" },
-  { href: "/customers", label: "Customers", icon: "UserCircle", roles: "all" },
-  { href: "/estimates", label: "Measurements", icon: "Ruler", roles: "all" },
-  { href: "/orders", label: "Window Orders", icon: "PackageOpen", roles: "administrator,manager,sales_representative" },
-  { href: "/jobs", label: "Jobs", icon: "Hammer", roles: "all" },
-  { href: "/calendar", label: "Calendar", icon: "Calendar", roles: "all" },
-  { href: "/crews", label: "Crews", icon: "HardHat", roles: "administrator,manager" },
-  { href: "/inventory", label: "Inventory", icon: "Package", roles: "administrator,manager" },
-  { href: "/reviews", label: "Reviews", icon: "Star", roles: "all" },
-  { href: "/reports", label: "Reports", icon: "BarChart3", roles: "administrator,manager,marketing" },
-  { href: "/marketing", label: "Marketing", icon: "Megaphone", roles: "administrator,marketing" },
-  { href: "/settings", label: "Settings", icon: "Settings", roles: "administrator" },
+  { href: "/app/dashboard", label: "Dashboard", icon: "LayoutDashboard", roles: "all" },
+  { href: "/app/leads", label: "Leads", icon: "Users", roles: "all" },
+  { href: "/app/quotes", label: "Quotes", icon: "FileText", roles: "administrator,manager,sales_representative" },
+  { href: "/app/customers", label: "Customers", icon: "UserCircle", roles: "all" },
+  { href: "/app/estimates", label: "Measurements", icon: "Ruler", roles: "all" },
+  { href: "/app/orders", label: "Window Orders", icon: "PackageOpen", roles: "administrator,manager,sales_representative" },
+  { href: "/app/jobs", label: "Jobs", icon: "Hammer", roles: "all" },
+  { href: "/app/calendar", label: "Calendar", icon: "Calendar", roles: "all" },
+  { href: "/app/crews", label: "Crews", icon: "HardHat", roles: "administrator,manager" },
+  { href: "/app/inventory", label: "Inventory", icon: "Package", roles: "administrator,manager" },
+  { href: "/app/reviews", label: "Reviews", icon: "Star", roles: "all" },
+  { href: "/app/reports", label: "Reports", icon: "BarChart3", roles: "administrator,manager,marketing" },
+  { href: "/app/marketing", label: "Marketing", icon: "Megaphone", roles: "administrator,marketing" },
+  // Tenant team management (§8, §13). Gated by NAV_CAPABILITY["/app/team"] = "team.view",
+  // which covers tenant_owner / tenant_admin / manager.
+  { href: "/app/team", label: "Team", icon: "Users2", roles: "administrator,manager" },
+  { href: "/app/settings", label: "Settings", icon: "Settings", roles: "administrator" },
 ] as const;
 
 // Default window manufacturers / product lines shipped as blank

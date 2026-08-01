@@ -32,6 +32,7 @@ import { buildAssignmentEmail } from "@/lib/email/templates";
 import { sendEmail } from "@/lib/email/service";
 import { getSettings, useSettingsStore } from "@/lib/settings/settings-store";
 import { activeManagers } from "@/lib/permissions";
+import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
 
 type SetState = (partial: object | ((s: ExtendedGetters) => object)) => void;
 
@@ -55,6 +56,19 @@ export interface ExtendedGetters {
 
 const gid = (p: string) => `${p}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
 const now = () => new Date().toISOString();
+
+/**
+ * Active tenant for new records (§1). Read lazily so this module stays usable
+ * on the server and in tests where no tenancy store exists. Records created
+ * without a workspace stay unscoped and are backfilled by migrateStoreToTenant.
+ */
+export function activeTenantId(): string | undefined {
+  try {
+    return useTenancyStore.getState().resolveSession()?.tenant?.id;
+  } catch {
+    return undefined;
+  }
+}
 
 // ── Seeds ────────────────────────────────────────────────────────
 export const SANDBOX_ADMIN_MEMBER: TeamMember = {
@@ -385,6 +399,7 @@ export function createExtendedActions(set: SetState, get: () => ExtendedGetters)
       const contact = primaryContact(lead);
       const quote: Quote = {
         id: gid("quote"),
+        tenant_id: lead.tenant_id ?? activeTenantId(),
         lead_id: leadId,
         owner_id: lead.assigned_estimator_id,
         customer_id: lead.customer_id || "",

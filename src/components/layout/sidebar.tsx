@@ -18,13 +18,15 @@ import {
   BarChart3,
   Megaphone,
   Settings,
+  Users2,
   PanelsTopLeft,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { APP, NAV_ITEMS } from "@/lib/domain";
-import { canSeeNav } from "@/lib/permissions";
-import { useCRMStore } from "@/lib/store/crm-store";
+import { canSeeRoute } from "@/lib/tenancy/authz";
+import { useTenancySession } from "@/lib/tenancy/use-tenancy-session";
+import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
 import { useSettingsStore } from "@/lib/settings/settings-store";
 
 const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
@@ -42,7 +44,10 @@ const ICON_MAP: Record<string, React.ComponentType<{ className?: string }>> = {
   BarChart3,
   Megaphone,
   Settings,
+  Users2,
 };
+
+type NavItem = (typeof NAV_ITEMS)[number];
 
 interface SidebarProps {
   open?: boolean;
@@ -51,13 +56,20 @@ interface SidebarProps {
 
 export function Sidebar({ open, onClose }: SidebarProps) {
   const pathname = usePathname();
-  // Nav is gated by the acting team member's role (§30), not the legacy profile.
-  const actingRole = useCRMStore((s) =>
-    s.teamMembers.find((m) => m.id === s.currentTeamMemberId)?.role
-  );
+  // Nav is gated by the TENANT session's role capabilities (§13). UX only —
+  // every route/API re-checks server-side.
+  const session = useTenancySession();
+  const hasHydrated = useTenancyStore((s) => s._hasHydrated);
   const companyName = useSettingsStore((s) => s.company.name);
 
-  const visibleNav = NAV_ITEMS.filter((item) => canSeeNav(item.roles, actingRole));
+  // A workspace session exists only when the user holds an active, accepted
+  // membership in a live tenant.
+  const hasWorkspace = Boolean(session?.tenant && session.membership?.active);
+
+  // No tenant yet (sandbox not registered) → keep the standalone CRM usable.
+  const visibleNav: NavItem[] = hasWorkspace
+    ? NAV_ITEMS.filter((item) => canSeeRoute(session, item.href))
+    : [...NAV_ITEMS];
 
   return (
     <>
@@ -77,7 +89,7 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         )}
       >
         <div className="flex h-16 items-center justify-between border-b border-sidebar-border px-5">
-          <Link href="/dashboard" className="flex items-center gap-2.5">
+          <Link href="/app/dashboard" className="flex items-center gap-2.5">
             <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-brand-blue">
               <PanelsTopLeft className="h-5 w-5 text-white" />
             </div>
@@ -115,7 +127,13 @@ export function Sidebar({ open, onClose }: SidebarProps) {
         </nav>
 
         <div className="border-t border-sidebar-border p-4">
-          <p className="text-xs text-slate-400">{companyName || APP.name}</p>
+          {hasHydrated && !hasWorkspace && (
+            <p className="mb-2 rounded-md bg-white/5 px-2 py-1.5 text-[11px] leading-snug text-slate-400">
+              <span className="font-semibold text-slate-300">No workspace</span> — showing all
+              sections. Register a company to enable role-based navigation.
+            </p>
+          )}
+          <p className="text-xs text-slate-400">{session?.tenant?.name || companyName || APP.name}</p>
           <p className="mt-0.5 text-xs text-slate-500">{APP.subtitle}</p>
         </div>
       </aside>
