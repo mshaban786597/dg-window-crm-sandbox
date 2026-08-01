@@ -299,7 +299,15 @@ export default function PlatformTenantDetailPage() {
   ];
 
   const applyPlanChange = () => {
-    if (planDraft) setTenantPlan(tenant.id, planDraft);
+    // Keep billing status aligned with the lifecycle: assigning a plan to a
+    // company that is still in trial must not book it as revenue.
+    const billingStatus =
+      tenant.status === "trial"
+        ? ("trialing" as const)
+        : tenant.status === "active"
+          ? ("active" as const)
+          : ("cancelled" as const);
+    if (planDraft) setTenantPlan(tenant.id, planDraft, billingStatus);
     updateTenant(tenant.id, { plan_id: planDraft || undefined });
     logAudit({
       action: "tenant.plan_changed",

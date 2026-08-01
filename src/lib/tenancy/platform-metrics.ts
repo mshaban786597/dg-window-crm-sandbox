@@ -11,6 +11,7 @@ import type {
   AuditLogEntry,
   FeatureEntitlement,
   FeatureFlag,
+  PlanEntitlement,
   OnboardingStep,
   SubscriptionPlan,
   SupportSession,
@@ -362,14 +363,23 @@ export function buildAlerts(input: {
 /**
  * Is `featureKey` enabled for a tenant?
  *
- * Precedence: an explicit per-tenant entitlement wins; then a per-tenant flag
- * override; then the global flag; otherwise disabled.
+ * Precedence, most specific first:
+ *   1. explicit per-tenant entitlement
+ *   2. per-tenant flag override
+ *   3. plan-level entitlement for the tenant's plan (Deliverable 3)
+ *   4. global flag
+ *   5. otherwise disabled
+ *
+ * `planId`/`planEntitlements` are optional so existing callers keep the old
+ * four-argument behaviour unchanged.
  */
 export function isFeatureEnabled(
   featureKey: string,
   tenantId: string,
   flags: FeatureFlag[],
-  entitlements: FeatureEntitlement[] = []
+  entitlements: FeatureEntitlement[] = [],
+  planId?: string | null,
+  planEntitlements: PlanEntitlement[] = []
 ): boolean {
   const entitlement = entitlements.find(
     (e) => e.tenant_id === tenantId && e.feature_key === featureKey
@@ -377,8 +387,16 @@ export function isFeatureEnabled(
   if (entitlement) return entitlement.enabled;
 
   const flag = flags.find((f) => f.key === featureKey);
+  if (flag?.enabled_tenant_ids.includes(tenantId)) return true;
+
+  if (planId) {
+    const planRule = planEntitlements.find(
+      (e) => e.plan_id === planId && e.feature_key === featureKey
+    );
+    if (planRule) return planRule.enabled;
+  }
+
   if (!flag) return false;
-  if (flag.enabled_tenant_ids.includes(tenantId)) return true;
   return flag.enabled_globally;
 }
 

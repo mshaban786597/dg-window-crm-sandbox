@@ -1,11 +1,14 @@
 "use client";
 
 /**
- * Global audit log viewer (§18).
+ * Global audit log viewer (§18, admin panel Deliverable 6).
  *
  * Cross-tenant, newest first. The actor column always shows the REAL
  * authenticated user; impersonated tenant users are shown separately so the
  * trail can never be mistaken for the tenant acting on its own.
+ *
+ * Filters, the CSV export and the row count all describe the SAME filtered set;
+ * pagination only changes which slice is drawn.
  */
 import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
@@ -15,11 +18,18 @@ import { EmptyState } from "@/components/shared/empty-state";
 import { DataTable } from "@/components/shared/data-table";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { SelectField } from "@/components/ui/select-field";
 import { useTenancyStore } from "@/lib/tenancy/tenancy-store";
+import { auditMatchesSearch } from "@/lib/tenancy/platform-metrics";
+import {
+  ExportCsvButton,
+  MetadataBlock,
+  PaginationBar,
+  usePagination,
+} from "../_components/admin-ui";
 import type { AuditLogEntry } from "@/lib/tenancy/types";
 import { formatDateTime } from "@/lib/utils";
 
@@ -32,6 +42,10 @@ export default function PlatformAuditPage() {
   const [tenantFilter, setTenantFilter] = useState("all");
   const [actionFilter, setActionFilter] = useState("all");
   const [actorFilter, setActorFilter] = useState("");
+  const [metaSearch, setMetaSearch] = useState("");
+  const [from, setFrom] = useState("");
+  const [to, setTo] = useState("");
+  const [selected, setSelected] = useState<AuditLogEntry | null>(null);
 
   const tenantOptions = useMemo(
     () => [
@@ -72,8 +86,17 @@ export default function PlatformAuditPage() {
 
   const rows = useMemo<AuditLogEntry[]>(() => {
     const actor = actorFilter.trim().toLowerCase();
+    const fromMs = from ? new Date(from + "T00:00:00").getTime() : null;
+    const toMs = to ? new Date(to + "T23:59:59.999").getTime() : null;
     return auditLogs
       .filter((l) => {
+        if (fromMs !== null || toMs !== null) {
+          const when = new Date(l.created_at).getTime();
+          if (Number.isNaN(when)) return false;
+          if (fromMs !== null && when < fromMs) return false;
+          if (toMs !== null && when > toMs) return false;
+        }
+        if (metaSearch.trim() && !auditMatchesSearch(l, metaSearch)) return false;
         if (tenantFilter === "platform" && l.tenant_id !== null) return false;
         if (tenantFilter !== "all" && tenantFilter !== "platform" && l.tenant_id !== tenantFilter) {
           return false;
@@ -88,9 +111,16 @@ export default function PlatformAuditPage() {
       })
       .slice()
       .sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime());
-  }, [auditLogs, labelForUser, tenantFilter, actionFilter, actorFilter]);
+  }, [auditLogs, labelForUser, tenantFilter, actionFilter, actorFilter, metaSearch, from, to]);
 
-  const filtersActive = tenantFilter !== "all" || actionFilter !== "all" || actorFilter !== "";
+  const pager = usePagination(rows, 25);
+
+  const filtersActive =
+    tenantFilter !== "all" ||
+    actionFilter !== "all" ||
+    actorFilter !== "" ||
+    metaSearch !== "" ||
+    Boolean(from || to);
 
   if (!hasHydrated) {
     return <p className="text-sm text-muted-foreground">Loading audit log…</p>;
@@ -103,19 +133,25 @@ export default function PlatformAuditPage() {
         description="Immutable record of tenant and platform activity across the deployment."
       />
 
-      <Card className="mb-6">
+      <Card className="mb-4">
         <CardContent className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-4">
           <SelectField
             label="Tenant"
             value={tenantFilter}
             options={tenantOptions}
-            onChange={setTenantFilter}
+            onChange={(v) => {
+              setTenantFilter(v);
+              pager.setPage(1);
+            }}
           />
           <SelectField
             label="Action"
             value={actionFilter}
             options={actionOptions}
-            onChange={setActionFilter}
+            onChange={(v) => {
+              setActionFilter(v);
+              pager.setPage(1);
+            }}
           />
           <div className="space-y-1.5">
             <Label htmlFor="actor">Actor</Label>
@@ -126,9 +162,52 @@ export default function PlatformAuditPage() {
                 className="pl-9"
                 placeholder="Name, email or role"
                 value={actorFilter}
-                onChange={(e) => setActorFilter(e.target.value)}
+                onChange={(e) => {
+                  setActorFilter(e.target.value);
+                  pager.setPage(1);
+                }}
               />
             </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="meta-search">Search metadata</Label>
+            <div className="relative">
+              <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input
+                id="meta-search"
+                className="pl-9"
+                placeholder="Action, entity or metadata value"
+                value={metaSearch}
+                onChange={(e) => {
+                  setMetaSearch(e.target.value);
+                  pager.setPage(1);
+                }}
+              />
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="audit-from">From</Label>
+            <Input
+              id="audit-from"
+              type="date"
+              value={from}
+              onChange={(e) => {
+                setFrom(e.target.value);
+                pager.setPage(1);
+              }}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="audit-to">To</Label>
+            <Input
+              id="audit-to"
+              type="date"
+              value={to}
+              onChange={(e) => {
+                setTo(e.target.value);
+                pager.setPage(1);
+              }}
+            />
           </div>
           <div className="flex items-end">
             <Button
@@ -139,6 +218,10 @@ export default function PlatformAuditPage() {
                 setTenantFilter("all");
                 setActionFilter("all");
                 setActorFilter("");
+                setMetaSearch("");
+                setFrom("");
+                setTo("");
+                pager.setPage(1);
               }}
             >
               Clear filters
@@ -146,6 +229,30 @@ export default function PlatformAuditPage() {
           </div>
         </CardContent>
       </Card>
+
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+        <Badge variant="outline">{rows.length} matching entries</Badge>
+        <ExportCsvButton
+          rows={rows}
+          filenamePrefix="audit-log"
+          columns={[
+            { header: "Timestamp", value: (l) => l.created_at },
+            { header: "Tenant", value: (l) => (l.tenant_id ? l.tenant_id : "platform") },
+            { header: "Actor", value: (l) => labelForUser(l.actor_user_id) },
+            { header: "Actor Role", value: (l) => l.actor_role },
+            {
+              header: "Acting As",
+              value: (l) => (l.impersonated_user_id ? labelForUser(l.impersonated_user_id) : ""),
+            },
+            { header: "Action", value: (l) => l.action },
+            { header: "Entity Type", value: (l) => l.entity_type ?? "" },
+            { header: "Entity Id", value: (l) => l.entity_id ?? "" },
+            { header: "IP", value: (l) => l.ip_address ?? "" },
+            { header: "User Agent", value: (l) => l.user_agent ?? "" },
+            { header: "Metadata", value: (l) => (l.metadata ? JSON.stringify(l.metadata) : "") },
+          ]}
+        />
+      </div>
 
       {auditLogs.length === 0 ? (
         <EmptyState
@@ -160,8 +267,10 @@ export default function PlatformAuditPage() {
           description="Try widening the tenant, action or actor filter."
         />
       ) : (
+        <Card className="overflow-hidden">
         <DataTable<AuditLogEntry>
-          data={rows}
+          data={pager.items}
+          onRowClick={(l) => setSelected((cur) => (cur?.id === l.id ? null : l))}
           columns={[
             { key: "when", header: "Timestamp", render: (l) => formatDateTime(l.created_at) },
             { key: "tenant", header: "Tenant", render: (l) => tenantName(l.tenant_id) },
@@ -194,7 +303,66 @@ export default function PlatformAuditPage() {
             },
           ]}
         />
+        <PaginationBar
+          page={pager.page}
+          totalPages={pager.totalPages}
+          total={pager.total}
+          perPage={pager.perPage}
+          onPage={pager.setPage}
+          onPerPage={pager.setPerPage}
+          label="entries"
+        />
+        </Card>
       )}
+
+      {selected && (
+        <Card className="mt-4">
+          <CardHeader className="flex flex-row items-center justify-between gap-3">
+            <CardTitle className="text-base">
+              {selected.action} · {formatDateTime(selected.created_at)}
+            </CardTitle>
+            <Button variant="ghost" size="sm" onClick={() => setSelected(null)}>
+              Close
+            </Button>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Actor</p>
+                <p className="text-sm">{labelForUser(selected.actor_user_id)}</p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  Acting as
+                </p>
+                <p className="text-sm">
+                  {selected.impersonated_user_id
+                    ? labelForUser(selected.impersonated_user_id)
+                    : "—"}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  IP address
+                </p>
+                <p className="text-sm">{selected.ip_address || "Not recorded"}</p>
+              </div>
+              <div className="min-w-0">
+                <p className="text-[11px] uppercase tracking-wide text-muted-foreground">
+                  User agent
+                </p>
+                <p className="truncate text-sm">{selected.user_agent || "Not recorded"}</p>
+              </div>
+            </div>
+            <MetadataBlock value={selected.metadata} />
+          </CardContent>
+        </Card>
+      )}
+
+      <p className="mt-4 text-xs text-muted-foreground">
+        Select a row to expand its full metadata. Fields that were never captured are shown as
+        &ldquo;Not recorded&rdquo; rather than filled in.
+      </p>
     </div>
   );
 }

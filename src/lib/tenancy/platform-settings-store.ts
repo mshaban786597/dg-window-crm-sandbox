@@ -13,6 +13,7 @@ import { persist } from "zustand/middleware";
 import type {
   FeatureEntitlement,
   FeatureFlag,
+  PlanEntitlement,
   SubscriptionPlan,
   TenantSubscription,
 } from "./types";
@@ -36,6 +37,23 @@ export interface PlatformSettings {
   /** Global kill switch for platform support impersonation (§26). */
   support_impersonation_allowed: boolean;
   default_plan_slug: PlanSlug;
+
+  // ── Security policy (admin panel Deliverable 9) ────────────────
+  /**
+   * Desired minimum password length. The AUTHORITATIVE value is the compile-time
+   * MIN_PASSWORD_LENGTH in lib/auth/policy.ts, which runs on the server; this
+   * field records the intended policy and is displayed next to the effective
+   * one so the two can never silently disagree.
+   */
+  password_min_length: number;
+  password_require_complexity: boolean;
+  session_timeout_minutes: number;
+  max_login_attempts: number;
+
+  // ── Quota defaults for new companies ───────────────────────────
+  /** null = unlimited. */
+  default_storage_mb: number | null;
+  default_max_users: number | null;
 }
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
@@ -47,6 +65,12 @@ export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
   maintenance_mode: false,
   support_impersonation_allowed: true,
   default_plan_slug: "starter",
+  password_min_length: 12,
+  password_require_complexity: true,
+  session_timeout_minutes: 60,
+  max_login_attempts: 5,
+  default_storage_mb: 1024,
+  default_max_users: 5,
 };
 
 /** Catalogue of sellable plans (§21). Read-only in the sandbox. */
@@ -157,6 +181,8 @@ interface PlatformSettingsState {
   subscriptions: TenantSubscription[];
   /** Per-tenant feature overrides (Deliverable 2/5). */
   entitlements: FeatureEntitlement[];
+  /** Plan-level feature defaults (Deliverable 3). */
+  planEntitlements: PlanEntitlement[];
 
   setHasHydrated: (v: boolean) => void;
   updateSettings: (patch: Partial<PlatformSettings>) => void;
@@ -171,12 +197,21 @@ interface PlatformSettingsState {
   toggleFlagGlobal: (key: string) => void;
   setTenantFlagOverride: (key: string, tenantId: string, enabled: boolean) => void;
 
+  // Plan entitlements
+  setPlanEntitlement: (planId: string, featureKey: string, enabled: boolean, limit?: number | null) => void;
+  clearPlanEntitlement: (planId: string, featureKey: string) => void;
+
   // Entitlements
   setEntitlement: (tenantId: string, featureKey: string, enabled: boolean, limit?: number | null) => void;
   clearEntitlement: (tenantId: string, featureKey: string) => void;
 
   // Subscriptions
-  setTenantPlan: (tenantId: string, planId: string) => void;
+  /**
+   * Assign a plan. `status` MUST reflect the tenant lifecycle — a company still
+   * in trial gets `trialing`, not `active`, or the new billing row would be
+   * counted as revenue the moment its plan changed.
+   */
+  setTenantPlan: (tenantId: string, planId: string, status?: TenantSubscription["status"]) => void;
   setSubscriptionStatus: (tenantId: string, status: TenantSubscription["status"]) => void;
 }
 
@@ -189,6 +224,7 @@ export const usePlatformSettingsStore = create<PlatformSettingsState>()(
       featureFlags: PLATFORM_FEATURE_FLAGS,
       subscriptions: [],
       entitlements: [],
+      planEntitlements: [],
 
       setHasHydrated: (v) => set({ _hasHydrated: v }),
       updateSettings: (patch) =>
@@ -224,6 +260,32 @@ export const usePlatformSettingsStore = create<PlatformSettingsState>()(
           }),
         })),
 
+      setPlanEntitlement: (planId, featureKey, enabled, limit = null) =>
+        set((s) => {
+          const existing = s.planEntitlements.find(
+            (e) => e.plan_id === planId && e.feature_key === featureKey
+          );
+          if (existing) {
+            return {
+              planEntitlements: s.planEntitlements.map((e) =>
+                e === existing ? { ...e, enabled, limit_value: limit } : e
+              ),
+            };
+          }
+          return {
+            planEntitlements: [
+              ...s.planEntitlements,
+              { id: newId("plan-ent"), plan_id: planId, feature_key: featureKey, enabled, limit_value: limit },
+            ],
+          };
+        }),
+      clearPlanEntitlement: (planId, featureKey) =>
+        set((s) => ({
+          planEntitlements: s.planEntitlements.filter(
+            (e) => !(e.plan_id === planId && e.feature_key === featureKey)
+          ),
+        })),
+
       setEntitlement: (tenantId, featureKey, enabled, limit = null) =>
         set((s) => {
           const existing = s.entitlements.find(
@@ -250,7 +312,7 @@ export const usePlatformSettingsStore = create<PlatformSettingsState>()(
           ),
         })),
 
-      setTenantPlan: (tenantId, planId) =>
+      setTenantPlan: (tenantId, planId, status = "active") =>
         set((s) => {
           const existing = s.subscriptions.find((x) => x.tenant_id === tenantId);
           if (existing) {
@@ -267,7 +329,7 @@ export const usePlatformSettingsStore = create<PlatformSettingsState>()(
                 id: newId("sub"),
                 tenant_id: tenantId,
                 plan_id: planId,
-                status: "active",
+                status,
                 started_at: new Date().toISOString(),
               },
             ],
@@ -290,6 +352,7 @@ export const usePlatformSettingsStore = create<PlatformSettingsState>()(
         featureFlags: s.featureFlags,
         subscriptions: s.subscriptions,
         entitlements: s.entitlements,
+        planEntitlements: s.planEntitlements,
       }),
     }
   )

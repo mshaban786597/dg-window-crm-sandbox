@@ -33,6 +33,7 @@ import type {
   AuditLogEntry,
   FeatureEntitlement,
   FeatureFlag,
+  PlanEntitlement,
   SubscriptionPlan,
   SupportSession,
   SystemEvent,
@@ -325,6 +326,44 @@ describe("feature entitlement resolution (Deliverable 5)", () => {
 
   it("returns false for an unknown feature", () => {
     expect(isFeatureEnabled("nope", "t1", flags)).toBe(false);
+  });
+
+  // ── Plan-level defaults (Deliverable 3) ────────────────────────
+  const planRules: PlanEntitlement[] = [
+    { id: "p1", plan_id: "plan-pro", feature_key: "ai_assistant", enabled: true },
+    { id: "p2", plan_id: "plan-pro", feature_key: "website_lead_intake", enabled: false },
+  ];
+
+  it("applies a plan default when the tenant has no rule of its own", () => {
+    expect(isFeatureEnabled("ai_assistant", "t1", flags, [], "plan-pro", planRules)).toBe(true);
+    expect(isFeatureEnabled("website_lead_intake", "t1", flags, [], "plan-pro", planRules)).toBe(
+      false
+    );
+  });
+
+  it("lets a tenant entitlement override the plan default", () => {
+    const ents: FeatureEntitlement[] = [
+      { id: "e1", tenant_id: "t1", feature_key: "ai_assistant", enabled: false },
+    ];
+    expect(isFeatureEnabled("ai_assistant", "t1", flags, ents, "plan-pro", planRules)).toBe(false);
+  });
+
+  it("lets a per-tenant flag override beat the plan default", () => {
+    expect(isFeatureEnabled("ai_assistant", "t-beta", flags, [], "plan-none", planRules)).toBe(
+      true
+    );
+  });
+
+  it("ignores plan rules for a tenant on a different plan", () => {
+    expect(isFeatureEnabled("ai_assistant", "t1", flags, [], "plan-starter", planRules)).toBe(
+      false
+    );
+  });
+
+  it("falls back to the global flag when the plan has no rule", () => {
+    expect(isFeatureEnabled("website_lead_intake", "t1", flags, [], "plan-starter", planRules)).toBe(
+      true
+    );
   });
 
   it("reads a numeric limit, null when unset", () => {

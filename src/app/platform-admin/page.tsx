@@ -179,10 +179,10 @@ export default function PlatformDashboardPage() {
 
   const registrationSeries = useMemo(
     () =>
-      registrationsByMonth(filteredTenants).map((r) => ({
-        month: monthLabel(r.month),
-        tenants: r.count,
-      })),
+      registrationsByMonth(filteredTenants)
+        .map((r) => ({ month: monthLabel(r.month), tenants: r.count }))
+        // A flat line of zeros is not a trend — fall through to the empty state.
+        .filter((_, __, arr) => arr.some((x) => x.tenants > 0)),
     [filteredTenants]
   );
 

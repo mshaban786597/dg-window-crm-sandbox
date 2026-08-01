@@ -220,6 +220,18 @@ export interface FeatureEntitlement {
   limit_value?: number | null;
 }
 
+/**
+ * Plan-level feature default (admin panel Deliverable 3). Applies to every
+ * tenant on the plan unless that tenant has its own `FeatureEntitlement`.
+ */
+export interface PlanEntitlement {
+  id: string;
+  plan_id: string;
+  feature_key: string;
+  enabled: boolean;
+  limit_value?: number | null;
+}
+
 export interface FeatureFlag {
   id: string;
   key: string;
