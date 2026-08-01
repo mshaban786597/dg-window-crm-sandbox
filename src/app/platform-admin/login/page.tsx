@@ -44,6 +44,7 @@
  */
 
 import type { Metadata } from "next";
+import { supabaseConfigured } from "@/lib/auth/server-auth";
 import { PlatformLoginForm } from "./login-form";
 
 export const metadata: Metadata = {
@@ -65,5 +66,7 @@ export default async function PlatformAdminLoginPage({
   // password that has already been accepted.
   const resumeMfa = (Array.isArray(raw) ? raw[0] : raw) === "1";
 
-  return <PlatformLoginForm resumeMfa={resumeMfa} />;
+  // Same call the layout makes, so the sign-in screen and the guard can never
+  // disagree about which gate is in force.
+  return <PlatformLoginForm resumeMfa={resumeMfa} sandboxFallback={!supabaseConfigured()} />;
 }

@@ -33,17 +33,20 @@ import {
   verifyMfaAction,
 } from "./actions";
 import type { PlatformMfaEnrolment, PlatformSignInNext } from "./types";
+import { PlatformSandboxEntry } from "./sandbox-entry";
 
 type Step = "resolving" | "credentials" | "enrol" | "challenge";
 
 export interface PlatformLoginFormProps {
   /** True when the layout bounced us here with `?mfa=1` (password already done). */
   resumeMfa: boolean;
+  /** Server-decided: no Supabase, so /platform-admin uses the sandbox gate. */
+  sandboxFallback: boolean;
 }
 
 const HEADING = "DG Window CRM Platform Administration";
 
-export function PlatformLoginForm({ resumeMfa }: PlatformLoginFormProps) {
+export function PlatformLoginForm({ resumeMfa, sandboxFallback }: PlatformLoginFormProps) {
   const router = useRouter();
 
   const [step, setStep] = useState<Step>(resumeMfa ? "resolving" : "credentials");
@@ -347,6 +350,8 @@ export function PlatformLoginForm({ resumeMfa }: PlatformLoginFormProps) {
             </form>
           )}
         </div>
+
+        <PlatformSandboxEntry sandboxFallback={sandboxFallback} />
 
         <p className="mt-6 text-center text-[11px] leading-relaxed text-slate-600">
           Platform administrator accounts are provisioned by the operator bootstrap process only.
