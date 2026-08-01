@@ -132,7 +132,7 @@ export async function enrollMfaAction(): Promise<PlatformMfaEnrolResult> {
 
   const { data, error } = await supabase.auth.mfa.enroll({
     factorType: "totp",
-    issuer: "DG Window CRM Platform",
+    issuer: "Window CRM Platform",
   });
   if (error || !data) {
     // Do not surface the provider message — it can describe account internals.

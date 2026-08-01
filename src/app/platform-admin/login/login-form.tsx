@@ -44,7 +44,7 @@ export interface PlatformLoginFormProps {
   sandboxFallback: boolean;
 }
 
-const HEADING = "DG Window CRM Platform Administration";
+const HEADING = "Window CRM Platform Administration";
 
 export function PlatformLoginForm({ resumeMfa, sandboxFallback }: PlatformLoginFormProps) {
   const router = useRouter();

@@ -78,7 +78,7 @@ export function buildAssignmentEmail(p: AssignmentEmailParams): { subject: strin
   <div style="font-family:Inter,Segoe UI,Arial,sans-serif;max-width:560px;margin:0 auto;">
     ${sandbox ? '<div style="background:#DBEAFE;color:#1D4ED8;padding:6px 12px;border-radius:6px;font-size:12px;font-weight:600;margin-bottom:16px;">SANDBOX EMAIL — not sent externally</div>' : ""}
     <h2 style="color:#0F172A;margin:0 0 4px;">An appointment has been assigned to you.</h2>
-    <p style="color:#64748B;margin:0 0 20px;">Hi ${esc(recipientName)}, a new appointment is assigned to you in DG Window CRM.</p>
+    <p style="color:#64748B;margin:0 0 20px;">Hi ${esc(recipientName)}, a new appointment is assigned to you in Window CRM.</p>
     <table style="border-collapse:collapse;font-size:14px;width:100%;">
       ${row("Primary contact", esc(contactName(primary)))}
       ${othersHtml}

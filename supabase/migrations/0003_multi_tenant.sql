@@ -1,5 +1,5 @@
 -- ============================================================================
--- DG Window CRM — Multi-tenant SaaS conversion (§11, §12, §19, §27)
+-- Window CRM — Multi-tenant SaaS conversion (§11, §12, §19, §27)
 --
 -- AUTHORITATIVE SECURITY BOUNDARY. Tenant isolation is enforced here by
 -- Row-Level Security, not by the frontend. Every tenant-owned table carries a
@@ -266,7 +266,7 @@ BEGIN
     SELECT id INTO v_tenant FROM tenants WHERE slug = 'dg-window-crm-sandbox';
     IF v_tenant IS NULL THEN
       INSERT INTO tenants (name, slug, status, owner_user_id, onboarding_status)
-      VALUES ('DG Window CRM Sandbox', 'dg-window-crm-sandbox', 'active', v_owner, 'completed')
+      VALUES ('Window CRM Sandbox', 'dg-window-crm-sandbox', 'active', v_owner, 'completed')
       RETURNING id INTO v_tenant;
     END IF;
 

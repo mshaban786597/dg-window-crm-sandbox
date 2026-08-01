@@ -1,6 +1,6 @@
 # Admin Panel — Build-to-Complete Prompt for Claude Code
 
-You are working in the **DG Window CRM** repository (Next.js 15 App Router + React 19 + TypeScript + Zustand stores + Supabase-ready multi-tenant SaaS sandbox).
+You are working in the **Window CRM** repository (Next.js 15 App Router + React 19 + TypeScript + Zustand stores + Supabase-ready multi-tenant SaaS sandbox).
 
 Your job: **complete the platform admin panel** so a platform super admin can run the entire SaaS from one place — see how many companies are registered, manage tenants/plans/users, monitor health, and take action. The skeleton already exists — **EXTEND it, do not rebuild it**.
 

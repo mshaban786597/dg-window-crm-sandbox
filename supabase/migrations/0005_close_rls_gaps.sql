@@ -1,4 +1,4 @@
--- DG Window CRM — close the row-level-security gaps that defeated tenant isolation.
+-- Window CRM — close the row-level-security gaps that defeated tenant isolation.
 --
 -- WHAT WENT WRONG
 -- ---------------

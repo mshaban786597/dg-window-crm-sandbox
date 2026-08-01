@@ -1,4 +1,4 @@
-# DG Window CRM — Multi-tenant security model
+# Window CRM — Multi-tenant security model
 
 ## Where isolation is actually enforced
 

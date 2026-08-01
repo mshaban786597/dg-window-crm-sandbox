@@ -57,7 +57,7 @@ export interface PlatformSettings {
 }
 
 export const DEFAULT_PLATFORM_SETTINGS: PlatformSettings = {
-  product_name: "DG Window CRM",
+  product_name: "Window CRM",
   support_email: "support@windowcrm.local",
   registration_enabled: true,
   email_verification_required: true,

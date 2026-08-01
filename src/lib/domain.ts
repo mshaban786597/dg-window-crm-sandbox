@@ -1,5 +1,5 @@
 /**
- * Central domain configuration for DG Window CRM.
+ * Central domain configuration for Window CRM.
  *
  * This is the single source of truth for window-industry terminology:
  * services, pipeline stages, statuses, taxonomies, and enums. Types are
@@ -12,7 +12,7 @@
 
 // ── Product identity ─────────────────────────────────────────────
 export const APP = {
-  name: "DG Window CRM",
+  name: "Window CRM",
   subtitle: "Window Sales & Operations",
 } as const;
 

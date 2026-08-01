@@ -1,4 +1,4 @@
--- DG Window CRM — feature-build migration (§27).
+-- Window CRM — feature-build migration (§27).
 -- NOTE: the running sandbox app persists via Zustand/localStorage (storage key
 -- dg-window-crm-sandbox-v1) with a versioned v3 migration; this SQL is the
 -- Supabase-ready equivalent for the NEW entities. Run only against a dedicated,

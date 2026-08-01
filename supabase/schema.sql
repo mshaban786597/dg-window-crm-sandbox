@@ -1,4 +1,4 @@
--- DG Window CRM — Supabase PostgreSQL Schema (sandbox)
+-- Window CRM — Supabase PostgreSQL Schema (sandbox)
 -- Run this in a DEDICATED, ISOLATED Supabase project's SQL Editor.
 -- Do NOT run against any existing production database.
 -- The application also runs fully in local empty-state mode with NO Supabase

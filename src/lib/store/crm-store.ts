@@ -80,6 +80,12 @@ import {
 
 // Persistence key for this isolated sandbox. Intentionally different from
 // any prior CRM key so the sandbox never reads or writes another app's data.
+/**
+ * NOTE: the "dg-window-crm" prefix is deliberate and must not be renamed with
+ * the product. localStorage keys are data addresses — changing one orphans
+ * every existing browser's data, silently, with no error. The product is now
+ * "Window CRM"; this key stays until a versioned migration moves it.
+ */
 const STORAGE_KEY = "dg-window-crm-sandbox-v1";
 
 function generateId(prefix: string): string {

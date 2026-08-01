@@ -1,5 +1,5 @@
 /**
- * Domain entity types for DG Window CRM.
+ * Domain entity types for Window CRM.
  *
  * Union types (stages, statuses, taxonomies) are owned by `@/lib/domain`
  * and re-exported here so the rest of the app can keep importing them from

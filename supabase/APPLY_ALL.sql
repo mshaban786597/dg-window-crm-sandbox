@@ -1,5 +1,5 @@
 -- ============================================================================
--- DG Window CRM - full database setup (apply ONCE, in this exact order)
+-- Window CRM - full database setup (apply ONCE, in this exact order)
 --
 -- HOW TO RUN
 --   Supabase Dashboard -> SQL Editor -> New query -> paste this whole file -> Run.
@@ -31,7 +31,7 @@ BEGIN;
 -- source: supabase/schema.sql
 -- ==========================================================================
 
--- DG Window CRM — Supabase PostgreSQL Schema (sandbox)
+-- Window CRM — Supabase PostgreSQL Schema (sandbox)
 -- Run this in a DEDICATED, ISOLATED Supabase project's SQL Editor.
 -- Do NOT run against any existing production database.
 -- The application also runs fully in local empty-state mode with NO Supabase
@@ -638,7 +638,7 @@ CREATE POLICY "Users can update own profile" ON profiles FOR UPDATE USING (auth.
 -- source: supabase/migrations/0002_feature_build.sql
 -- ==========================================================================
 
--- DG Window CRM — feature-build migration (§27).
+-- Window CRM — feature-build migration (§27).
 -- NOTE: the running sandbox app persists via Zustand/localStorage (storage key
 -- dg-window-crm-sandbox-v1) with a versioned v3 migration; this SQL is the
 -- Supabase-ready equivalent for the NEW entities. Run only against a dedicated,
@@ -877,7 +877,7 @@ END $$;
 -- ==========================================================================
 
 -- ============================================================================
--- DG Window CRM — Multi-tenant SaaS conversion (§11, §12, §19, §27)
+-- Window CRM — Multi-tenant SaaS conversion (§11, §12, §19, §27)
 --
 -- AUTHORITATIVE SECURITY BOUNDARY. Tenant isolation is enforced here by
 -- Row-Level Security, not by the frontend. Every tenant-owned table carries a
@@ -1144,7 +1144,7 @@ BEGIN
     SELECT id INTO v_tenant FROM tenants WHERE slug = 'dg-window-crm-sandbox';
     IF v_tenant IS NULL THEN
       INSERT INTO tenants (name, slug, status, owner_user_id, onboarding_status)
-      VALUES ('DG Window CRM Sandbox', 'dg-window-crm-sandbox', 'active', v_owner, 'completed')
+      VALUES ('Window CRM Sandbox', 'dg-window-crm-sandbox', 'active', v_owner, 'completed')
       RETURNING id INTO v_tenant;
     END IF;
 
@@ -1459,7 +1459,7 @@ END $$;
 -- ==========================================================================
 
 -- ============================================================================
--- DG Window CRM — Authentication & isolation hardening (§3–§9, §12, §14)
+-- Window CRM — Authentication & isolation hardening (§3–§9, §12, §14)
 --
 -- Adds the atomic SECURITY DEFINER routines the server actions rely on, the
 -- assignment-level RLS predicates, and the storage policies.

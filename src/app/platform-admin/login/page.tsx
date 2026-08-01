@@ -48,7 +48,7 @@ import { supabaseConfigured } from "@/lib/auth/server-auth";
 import { PlatformLoginForm } from "./login-form";
 
 export const metadata: Metadata = {
-  title: "DG Window CRM Platform Administration",
+  title: "Window CRM Platform Administration",
   robots: { index: false, follow: false },
 };
 

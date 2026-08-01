@@ -1,5 +1,5 @@
 -- ============================================================================
--- DG Window CRM — Authentication & isolation hardening (§3–§9, §12, §14)
+-- Window CRM — Authentication & isolation hardening (§3–§9, §12, §14)
 --
 -- Adds the atomic SECURITY DEFINER routines the server actions rely on, the
 -- assignment-level RLS predicates, and the storage policies.
